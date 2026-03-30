@@ -2,6 +2,7 @@
 LED Hardware Abstraction
 ========================
 Controls RGB LED strips with color and flash patterns.
+Includes console visualization for testing without hardware.
 """
 
 import time
@@ -9,6 +10,35 @@ import logging
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
+# ANSI color codes for terminal output
+ANSI_COLORS = {
+    (0, 255, 0): "\033[92m",      # Green (IDLE)
+    (255, 0, 255): "\033[95m",    # Magenta (DANCE)
+    (0, 0, 255): "\033[94m",      # Blue (PATROL)
+    (255, 255, 0): "\033[93m",    # Yellow (SCAN)
+    (255, 0, 0): "\033[91m",      # Red (ERROR)
+    (255, 165, 0): "\033[33m",    # Orange (OBSTACLE)
+    (0, 100, 255): "\033[36m",    # Cyan (RUNNING)
+    (0, 0, 0): "\033[0m",         # Reset (OFF)
+}
+ANSI_RESET = "\033[0m"
+
+
+def _rgb_to_ansi(rgb: Tuple[int, int, int]) -> str:
+    """Get closest ANSI color code for RGB."""
+    return ANSI_COLORS.get(rgb, ANSI_RESET)
+
+
+def _visualize_led(rgb: Tuple[int, int, int], label: str = "") -> str:
+    """Create a visual LED indicator for console."""
+    if rgb == (0, 0, 0):
+        symbol = "◯"  # Off
+    else:
+        symbol = "●"  # On/lit
+    
+    color_code = _rgb_to_ansi(rgb)
+    return f"{color_code}{symbol}{ANSI_RESET} {label}"
 
 
 class LEDController:
@@ -74,7 +104,9 @@ class LEDController:
                 self.strip.setPixelColor(i, self.Color(rgb[0], rgb[1], rgb[2]))
             self.strip.show()
         
-        logger.debug(f"LED color set to RGB{rgb}")
+        # Console visualization
+        viz = _visualize_led(rgb)
+        logger.info(f"LED set color {viz} RGB{rgb}")
 
     def turn_off(self):
         """Turn off all LEDs."""
@@ -92,7 +124,10 @@ class LEDController:
         self.is_flashing = True
         self.flash_interval = interval
         self.flash_start_time = time.time()
-        logger.debug(f"LED flash started: RGB{rgb}, interval={interval}s")
+        
+        # Console visualization
+        viz = _visualize_led(rgb)
+        logger.info(f"LED flash started {viz} RGB{rgb} @ {interval}s interval")
 
     def update(self):
         """Called periodically to update flash state."""
@@ -111,6 +146,15 @@ class LEDController:
             for i in range(self.count):
                 self.strip.setPixelColor(i, self.Color(color[0], color[1], color[2]))
             self.strip.show()
+        
+        # Console visualization - show flash state occasionally
+        if position_in_cycle < 0.05:  # Show state change at start of each phase
+            state = "ON " if is_on else "OFF"
+            if is_on:
+                viz = _visualize_led(self.current_color)
+            else:
+                viz = _visualize_led((0, 0, 0))
+            logger.debug(f"LED flash [{state}] {viz}")
 
     def pulse(self, rgb: Tuple[int, int, int], cycles: int = 3):
         """Pulse LEDs a specific number of times."""

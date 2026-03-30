@@ -105,16 +105,60 @@ class RatBrain:
         
         return (255, 255, 255)  # White fallback
 
+    def _print_selection_menu(self):
+        """Print visual selection menu to console."""
+        print("\n" + "="*60)
+        print("RAT BRAIN - SELECTION MENU")
+        print("="*60)
+        
+        for idx, item_name in enumerate(MENU_ITEMS):
+            selected = "→ " if idx == self.selection_index else "  "
+            
+            # Get item color
+            if item_name in self.behaviors:
+                color = self.behaviors[item_name]["color"]
+            elif item_name in self.missions:
+                color = self.missions[item_name]["color"]
+            else:
+                color = (255, 255, 255)
+            
+            # Add ANSI color code
+            if color == (0, 255, 0):
+                color_code = "\033[92m"  # Green
+            elif color == (255, 0, 255):
+                color_code = "\033[95m"  # Magenta
+            elif color == (0, 0, 255):
+                color_code = "\033[94m"  # Blue
+            elif color == (255, 255, 0):
+                color_code = "\033[93m"  # Yellow
+            elif color == (255, 0, 0):
+                color_code = "\033[91m"  # Red
+            elif color == (255, 165, 0):
+                color_code = "\033[33m"  # Orange
+            else:
+                color_code = ""
+            
+            reset_code = "\033[0m"
+            bullet = "●" if idx == self.selection_index else "○"
+            
+            print(f"{selected}{color_code}{bullet} {item_name}{reset_code}")
+        
+        print("="*60)
+        print("Commands: a(LEFT), d(RIGHT), s(SELECT), q(QUIT on PC)")
+        print("="*60 + "\n")
+
     def _update_idle_state(self):
         """Process commands and manage selection in IDLE state."""
         command = self.command_server.get_command(timeout=0.01)
         
         if command == "LEFT":
             self.selection_index = (self.selection_index - 1) % len(MENU_ITEMS)
+            self._print_selection_menu()
             logger.info(f"Selection: {self._get_selected_item_name()}")
         
         elif command == "RIGHT":
             self.selection_index = (self.selection_index + 1) % len(MENU_ITEMS)
+            self._print_selection_menu()
             logger.info(f"Selection: {self._get_selected_item_name()}")
         
         elif command == "SELECT":
@@ -213,6 +257,9 @@ class RatBrain:
         """Start the main brain loop."""
         logger.info("RAT BRAIN STARTED")
         self.command_server.start()
+        
+        # Print initial menu
+        self._print_selection_menu()
         
         try:
             while True:
