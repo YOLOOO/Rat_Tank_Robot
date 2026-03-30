@@ -37,7 +37,16 @@ class LEDController:
 
         # Try to import actual hardware driver
         try:
-            from rpi_ws281x import Adafruit_NeoPixel, Color
+            # Try local library first (for development/consistency)
+            try:
+                from lib_utils.rpi_ws281x import Adafruit_NeoPixel, Color
+                logger.debug("Using local rpi_ws281x library")
+            except (ImportError, ModuleNotFoundError) as e:
+                # Fall back to system package
+                logger.debug(f"Local import failed ({e}), trying system package")
+                from rpi_ws281x import Adafruit_NeoPixel, Color
+                logger.debug("Using system rpi_ws281x library")
+            
             self.Adafruit_NeoPixel = Adafruit_NeoPixel
             self.Color = Color
             self.strip = Adafruit_NeoPixel(count, pin, 800000, 10, False, brightness)
