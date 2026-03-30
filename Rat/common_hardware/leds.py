@@ -96,6 +96,10 @@ class LEDController:
         self.hardware_available = False
         self.strip = None
         self.pi_version = _get_raspberry_pi_version()
+        
+        # State tracking - only print when state actually changes
+        self._last_color = None
+        self._last_flash_state = None
 
         # Check hardware compatibility
         if not self._is_hardware_supported():
@@ -121,81 +125,73 @@ class LEDController:
             # Construct import path for local lib_utils
             lib_utils_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib_utils')
             
+            # Add lib_utils to path
+            import sys
+            if lib_utils_path not in sys.path:
+                sys.path.insert(0, lib_utils_path)
+            
             # Try to import Freenove wrapper from local lib_utils
             try:
-                # Add lib_utils to path temporarily
-                import sys
-                if lib_utils_path not in sys.path:
-                    sys.path.insert(0, lib_utils_path)
-                
-                from rpi_ws281x import Adafruit_NeoPixel, Color
-                logger.debug(f"Using local rpi_ws281x from {lib_utils_path}")
+                from freenove_rpi_ws281x import Freenove_RPI_WS281X
+                logger.debug(f"Using local Freenove_RPI_WS281X from {lib_utils_path}")
             except (ImportError, ModuleNotFoundError) as e:
-                logger.debug(f"Local import failed ({e}), trying system package")
-                from rpi_ws281x import Adafruit_NeoPixel, Color
-                logger.debug("Using system rpi_ws281x library")
+                logger.debug(f"Local Freenove wrapper import failed ({e}), trying system package")
+                # Fallback would require Freenove to be installed system-wide
+                raise ImportError("Freenove_RPI_WS281X not available in local or system packages")
             
-            # Initialize the Freenove wrapper
-            # Using direct Adafruit_NeoPixel for simplicity (Freenove wrapper adds complexity)
-            self.strip = Adafruit_NeoPixel(self.count, self.pin, 800000, 10, False, self.brightness)
+            # Initialize the actual Freenove wrapper
+            self.strip = Freenove_RPI_WS281X(
+                led_count=self.count,
+                bright=self.brightness,
+                sequence=self.color_format
+            )
             
-            # Try to initialize hardware
-            if self.strip.begin():
-                # Clear all LEDs to black
-                for i in range(self.count):
-                    self.strip.setPixelColor(i, Color(0, 0, 0))
-                self.strip.show()
-                
-                logger.info(f"LEDs initialized: pin={self.pin}, count={self.count}, "
+            # Check initialization state
+            if self.strip.check_rpi_ws281x_state() == 0:
+                logger.info(f"LEDs initialized: pin=18, count={self.count}, "
                           f"brightness={self.brightness}, format={self.color_format}, "
                           f"Pi_v{self.pi_version}, PCB_v{self.pcb_version}")
                 self.hardware_available = True
             else:
-                logger.warning("LED strip initialization returned False - simulation mode")
+                logger.warning("LED strip initialization failed - simulation mode")
                 self.hardware_available = False
         except RuntimeError as hw_err:
             logger.warning(f"LED hardware init failed: {hw_err} - simulation mode")
             self.hardware_available = False
         except ImportError as imp_err:
-            logger.warning(f"LED library not available ({imp_err}) - simulation mode")
+            logger.warning(f"Freenove wrapper not available ({imp_err}) - simulation mode")
             self.hardware_available = False
         except Exception as e:
             logger.warning(f"LED initialization error: {e} - simulation mode")
             self.hardware_available = False
 
-    def _rgb_to_internal(self, rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
-        """Convert RGB to internal format based on LED sequence type."""
-        r, g, b = rgb
-        
-        # Map color sequences (standard is RGB, Freenove tank typically uses 'RGB')
-        sequences = {
-            'RGB': (r, g, b),
-            'RBG': (r, b, g),
-            'GRB': (g, r, b),
-            'GBR': (g, b, r),
-            'BRG': (b, r, g),
-            'BGR': (b, g, r),
-        }
-        return sequences.get(self.color_format, (r, g, b))
 
     def set_color(self, rgb: Tuple[int, int, int]):
         """Set all LEDs to a single color (stop flashing)."""
         self.current_color = rgb
         self.is_flashing = False
         
-        if self.hardware_available and self.strip:
-            try:
-                from rpi_ws281x import Color
-                converted = self._rgb_to_internal(rgb)
-                for i in range(self.count):
-                    self.strip.setPixelColor(i, Color(converted[0], converted[1], converted[2]))
-                self.strip.show()
-            except Exception as e:
-                logger.debug(f"Set color hardware error: {e}")
-        
-        # Console visualization
-        viz = _visualize_led(rgb)
-        logger.info(f"LED set color {viz} RGB{rgb}")
+        # Only print if color actually changed
+        if self._last_color != rgb:
+            self._last_color = rgb
+            self._last_flash_state = None  # Reset flash state tracking
+            
+            if self.hardware_available and self.strip:
+                try:
+                    self.strip.set_all_led_rgb(rgb)
+                except Exception as e:
+                    logger.debug(f"Set color hardware error: {e}")
+            
+            # Console visualization
+            viz = _visualize_led(rgb)
+            logger.info(f"LED set color {viz} RGB{rgb}")
+        else:
+            # Still update hardware silently if color not changed
+            if self.hardware_available and self.strip:
+                try:
+                    self.strip.set_all_led_rgb(rgb)
+                except Exception as e:
+                    logger.debug(f"Set color hardware error: {e}")
 
     
     def turn_off(self):
@@ -233,18 +229,15 @@ class LEDController:
 
         if self.hardware_available and self.strip:
             try:
-                from rpi_ws281x import Color
                 color = self.current_color if is_on else (0, 0, 0)
-                converted = self._rgb_to_internal(color)
-                for i in range(self.count):
-                    self.strip.setPixelColor(i, Color(converted[0], converted[1], converted[2]))
-                self.strip.show()
+                self.strip.set_all_led_rgb(color)
             except Exception as e:
                 logger.debug(f"Flash update hardware error: {e}")
         
-        # Console visualization - show flash state occasionally
-        if position_in_cycle < 0.05:  # Show state change at start of each phase
-            state = "ON " if is_on else "OFF"
+        # Only print when flash state actually changes (ON->OFF or OFF->ON)
+        if self._last_flash_state != is_on:
+            self._last_flash_state = is_on
+            state = "ON" if is_on else "OFF"
             if is_on:
                 viz = _visualize_led(self.current_color)
             else:
