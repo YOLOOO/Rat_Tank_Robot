@@ -11,9 +11,10 @@ import sys
 from enum import Enum
 from typing import Optional
 import importlib
+import os
 
 # Add parent directory to path for config import
-sys.path.insert(0, "..")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import BEHAVIORS, MISSIONS, MENU_ITEMS, STATE_UPDATE_INTERVAL, DEBUG
 from rat_brain.control_receiver_server import get_command_server

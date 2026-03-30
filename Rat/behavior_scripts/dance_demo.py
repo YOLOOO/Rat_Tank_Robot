@@ -6,6 +6,12 @@ Robot spins and moves in a demo pattern.
 
 import time
 import logging
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from behavior_scripts.base_behavior import BaseBehavior
 
 logger = logging.getLogger(__name__)

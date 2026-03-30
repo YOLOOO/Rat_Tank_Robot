@@ -33,6 +33,7 @@ class LEDController:
         self.is_flashing = False
         self.flash_start_time = None
         self.flash_interval = 0.5
+        self.hardware_available = False
 
         # Try to import actual hardware driver
         try:
@@ -40,11 +41,18 @@ class LEDController:
             self.Adafruit_NeoPixel = Adafruit_NeoPixel
             self.Color = Color
             self.strip = Adafruit_NeoPixel(count, pin, 800000, 10, False, brightness)
-            self.strip.begin()
-            logger.info(f"LEDs initialized on pin {pin} with {count} LEDs")
-            self.hardware_available = True
+            try:
+                self.strip.begin()
+                logger.info(f"LEDs initialized on pin {pin} with {count} LEDs")
+                self.hardware_available = True
+            except RuntimeError as hw_err:
+                logger.warning(f"LED hardware init failed: {hw_err} - running in simulation mode")
+                self.hardware_available = False
         except ImportError:
             logger.warning("LED library not available - running in simulation mode")
+            self.hardware_available = False
+        except Exception as e:
+            logger.warning(f"LED initialization error: {e} - running in simulation mode")
             self.hardware_available = False
 
     def set_color(self, rgb: Tuple[int, int, int]):

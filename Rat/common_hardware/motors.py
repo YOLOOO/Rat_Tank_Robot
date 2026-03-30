@@ -70,8 +70,10 @@ class MotorController:
             logger.info("Motor controller initialized")
         except ImportError:
             logger.warning("RPi.GPIO not available - running in simulation mode")
-        except RuntimeError as e:
-            logger.error(f"GPIO setup failed: {e} - continuing in simulation mode")
+        except RuntimeError as hw_err:
+            logger.warning(f"GPIO initialization failed: {hw_err} - running in simulation mode")
+        except Exception as e:
+            logger.warning(f"Motor controller error: {e} - running in simulation mode")
 
     def _set_motor(self, fwd_pwm, bwd_pwm, speed: int):
         """
@@ -139,14 +141,18 @@ class MotorController:
         self.stop()
         if self.hardware_available:
             try:
-                self.left_fwd_pwm.stop()
-                self.left_bwd_pwm.stop()
-                self.right_fwd_pwm.stop()
-                self.right_bwd_pwm.stop()
+                if hasattr(self, 'left_fwd_pwm'):
+                    self.left_fwd_pwm.stop()
+                if hasattr(self, 'left_bwd_pwm'):
+                    self.left_bwd_pwm.stop()
+                if hasattr(self, 'right_fwd_pwm'):
+                    self.right_fwd_pwm.stop()
+                if hasattr(self, 'right_bwd_pwm'):
+                    self.right_bwd_pwm.stop()
                 self.GPIO.cleanup()
                 logger.info("Motor controller cleaned up")
             except Exception as e:
-                logger.error(f"Error during cleanup: {e}")
+                logger.warning(f"Error during cleanup: {e}")
 
 
 # Singleton instance
