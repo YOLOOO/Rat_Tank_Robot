@@ -2,6 +2,8 @@
 
 MVP implementation of a modular robot control system for the Freenove Tank (FNK0077) running on Raspberry Pi 5.
 
+**Full Setup Guide**: See [SETUP_GUIDE.md](SETUP_GUIDE.md)
+
 ## Quick Start
 
 ### On Robot (Raspberry Pi 5)
@@ -97,6 +99,25 @@ Edit `config.py` to:
 - Set LED colors and timings
 - Configure motor pins
 - Adjust motor speeds
+
+## Local Dependencies
+
+**All dependencies are vendored locally** in `lib_utils/`:
+
+- **rpi_ws281x** - LED control library
+- **pi-hardware-pwm** - Raspberry Pi 5 PWM overlay setup scripts
+
+No external package downloads needed! See [lib_utils/README.md](lib_utils/README.md) for details.
+
+### PWM Setup (One-time on Pi 5)
+
+```bash
+cd Rat/lib_utils/pi-hardware-pwm/
+sudo ./setup_pwm_overlay.sh
+sudo reboot
+```
+
+This enables PWM on GPIO pins for motor control.
 
 ## Adding New Behaviors
 
