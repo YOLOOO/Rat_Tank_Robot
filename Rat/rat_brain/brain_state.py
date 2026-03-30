@@ -16,7 +16,10 @@ import os
 # Add parent directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import BEHAVIORS, MISSIONS, MENU_ITEMS, STATE_UPDATE_INTERVAL, DEBUG
+from config import (
+    BEHAVIORS, MISSIONS, MENU_ITEMS, STATE_UPDATE_INTERVAL, DEBUG,
+    LED_PIN, LED_COUNT, LED_BRIGHTNESS, LED_COLOR_FORMAT, LED_PCB_VERSION
+)
 from rat_brain.control_receiver_server import get_command_server
 from common_hardware import get_led_controller, get_motor_controller
 
@@ -42,11 +45,11 @@ class RatBrain:
         
         # Initialize LED controller with Freenove tank parameters
         self.led_controller = get_led_controller(
-            pin=config.LED_PIN,
-            count=config.LED_COUNT,
-            brightness=config.LED_BRIGHTNESS,
-            color_format=config.LED_COLOR_FORMAT,
-            pcb_version=config.LED_PCB_VERSION
+            pin=LED_PIN,
+            count=LED_COUNT,
+            brightness=LED_BRIGHTNESS,
+            color_format=LED_COLOR_FORMAT,
+            pcb_version=LED_PCB_VERSION
         )
         
         self.motor_controller = get_motor_controller()
