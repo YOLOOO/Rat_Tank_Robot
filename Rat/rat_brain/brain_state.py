@@ -39,7 +39,16 @@ class RatBrain:
         """Initialize the robot brain."""
         self.state = RobotState.IDLE
         self.command_server = get_command_server()
-        self.led_controller = get_led_controller()
+        
+        # Initialize LED controller with Freenove tank parameters
+        self.led_controller = get_led_controller(
+            pin=config.LED_PIN,
+            count=config.LED_COUNT,
+            brightness=config.LED_BRIGHTNESS,
+            color_format=config.LED_COLOR_FORMAT,
+            pcb_version=config.LED_PCB_VERSION
+        )
+        
         self.motor_controller = get_motor_controller()
         
         self.selection_index = 0

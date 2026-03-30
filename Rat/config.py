@@ -36,10 +36,13 @@ MISSIONS = {
 # ============================================================================
 # LED CONFIGURATION
 # ============================================================================
-LED_PIN = 18  # GPIO pin for LED strip
-LED_COUNT = 24  # Number of LEDs
-LED_BRIGHTNESS = 255
+# Freenove FNK0077 Tank: 4 LEDs on GPIO pin 18
+LED_PIN = 18  # GPIO pin for LED strip (GPIO_GEN1)
+LED_COUNT = 4  # Number of LEDs (Freenove tank has 4)
+LED_BRIGHTNESS = 255  # Max brightness 0-255
 LED_FLASH_INTERVAL = 0.5  # seconds
+LED_PCB_VERSION = 2  # PCB version (2 for Pi 5, 1 for older Pi)
+LED_COLOR_FORMAT = 'RGB'  # RGB sequence type ('RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR')
 
 # LED Colors (RGB)
 LED_COLORS = {

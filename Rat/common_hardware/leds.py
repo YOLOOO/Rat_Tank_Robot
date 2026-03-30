@@ -2,11 +2,14 @@
 LED Hardware Abstraction
 ========================
 Controls RGB LED strips with color and flash patterns.
+Adapted from Freenove FNK0077 Tank implementation.
 Includes console visualization for testing without hardware.
 """
 
 import time
 import logging
+import subprocess
+import os
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -41,73 +44,160 @@ def _visualize_led(rgb: Tuple[int, int, int], label: str = "") -> str:
     return f"{color_code}{symbol}{ANSI_RESET} {label}"
 
 
+def _get_raspberry_pi_version() -> int:
+    """
+    Detect Raspberry Pi version.
+    Returns: 1 for Pi < 5, 2 for Pi 5
+    """
+    try:
+        result = subprocess.run(['cat', '/sys/firmware/devicetree/base/model'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            model = result.stdout.strip()
+            if "Raspberry Pi 5" in model:
+                logger.debug(f"Detected: {model} (Pi version 2)")
+                return 2
+            else:
+                logger.debug(f"Detected: {model} (Pi version 1)")
+                return 1
+    except Exception as e:
+        logger.debug(f"Pi version detection failed: {e}, assuming Pi version 1")
+    return 1
+
+
 class LEDController:
     """
-    Abstraction for LED control.
-    Works on Raspberry Pi with ws2812b (NeoPixel) or similar.
+    Abstraction for LED control using Freenove_RPI_WS281X wrapper.
+    Works on Raspberry Pi with ws2812b (NeoPixel) LED strips.
+    Gracefully falls back to simulation mode if hardware unavailable.
     """
 
-    def __init__(self, pin: int = 18, count: int = 24, brightness: int = 255):
+    def __init__(self, pin: int = 18, count: int = 4, brightness: int = 255, 
+                 color_format: str = 'RGB', pcb_version: int = 2):
         """
-        Initialize LED controller.
+        Initialize LED controller using Freenove wrapper.
         
         Args:
-            pin: GPIO pin number
-            count: Number of LEDs
+            pin: GPIO pin number (18 for GPIO_GEN1)
+            count: Number of LEDs (typically 4 for Freenove tank)
             brightness: Max brightness (0-255)
+            color_format: RGB sequence type ('RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR')
+            pcb_version: PCB version (1 or 2)
         """
         self.pin = pin
         self.count = count
         self.brightness = brightness
+        self.color_format = color_format
+        self.pcb_version = pcb_version
         self.current_color = (0, 0, 0)
         self.is_flashing = False
         self.flash_start_time = None
         self.flash_interval = 0.5
         self.hardware_available = False
+        self.strip = None
+        self.pi_version = _get_raspberry_pi_version()
 
-        # Try to import actual hardware driver
+        # Check hardware compatibility
+        if not self._is_hardware_supported():
+            logger.warning(f"PCB v{pcb_version} not supported on Raspberry Pi {self.pi_version} - simulation mode")
+            return
+
+        # Try to initialize hardware
+        self._init_hardware()
+
+    def _is_hardware_supported(self) -> bool:
+        """Check if hardware combination is supported."""
+        # PCB v1 not supported on Raspberry Pi 5
+        if self.pcb_version == 1 and self.pi_version == 2:
+            return False
+        # PCB v2 works on both Pi versions
+        if self.pcb_version == 2:
+            return True
+        return True
+
+    def _init_hardware(self):
+        """Initialize Freenove_RPI_WS281X wrapper with local dependencies."""
         try:
-            # Try local library first (for development/consistency)
+            # Construct import path for local lib_utils
+            lib_utils_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib_utils')
+            
+            # Try to import Freenove wrapper from local lib_utils
             try:
-                from lib_utils.rpi_ws281x import Adafruit_NeoPixel, Color
-                logger.debug("Using local rpi_ws281x library")
+                # Add lib_utils to path temporarily
+                import sys
+                if lib_utils_path not in sys.path:
+                    sys.path.insert(0, lib_utils_path)
+                
+                from rpi_ws281x import Adafruit_NeoPixel, Color
+                logger.debug(f"Using local rpi_ws281x from {lib_utils_path}")
             except (ImportError, ModuleNotFoundError) as e:
-                # Fall back to system package
                 logger.debug(f"Local import failed ({e}), trying system package")
                 from rpi_ws281x import Adafruit_NeoPixel, Color
                 logger.debug("Using system rpi_ws281x library")
             
-            self.Adafruit_NeoPixel = Adafruit_NeoPixel
-            self.Color = Color
-            self.strip = Adafruit_NeoPixel(count, pin, 800000, 10, False, brightness)
-            try:
-                self.strip.begin()
-                logger.info(f"LEDs initialized on pin {pin} with {count} LEDs")
+            # Initialize the Freenove wrapper
+            # Using direct Adafruit_NeoPixel for simplicity (Freenove wrapper adds complexity)
+            self.strip = Adafruit_NeoPixel(self.count, self.pin, 800000, 10, False, self.brightness)
+            
+            # Try to initialize hardware
+            if self.strip.begin():
+                # Clear all LEDs to black
+                for i in range(self.count):
+                    self.strip.setPixelColor(i, Color(0, 0, 0))
+                self.strip.show()
+                
+                logger.info(f"LEDs initialized: pin={self.pin}, count={self.count}, "
+                          f"brightness={self.brightness}, format={self.color_format}, "
+                          f"Pi_v{self.pi_version}, PCB_v{self.pcb_version}")
                 self.hardware_available = True
-            except RuntimeError as hw_err:
-                logger.warning(f"LED hardware init failed: {hw_err} - running in simulation mode")
+            else:
+                logger.warning("LED strip initialization returned False - simulation mode")
                 self.hardware_available = False
-        except ImportError:
-            logger.warning("LED library not available - running in simulation mode")
+        except RuntimeError as hw_err:
+            logger.warning(f"LED hardware init failed: {hw_err} - simulation mode")
+            self.hardware_available = False
+        except ImportError as imp_err:
+            logger.warning(f"LED library not available ({imp_err}) - simulation mode")
             self.hardware_available = False
         except Exception as e:
-            logger.warning(f"LED initialization error: {e} - running in simulation mode")
+            logger.warning(f"LED initialization error: {e} - simulation mode")
             self.hardware_available = False
+
+    def _rgb_to_internal(self, rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """Convert RGB to internal format based on LED sequence type."""
+        r, g, b = rgb
+        
+        # Map color sequences (standard is RGB, Freenove tank typically uses 'RGB')
+        sequences = {
+            'RGB': (r, g, b),
+            'RBG': (r, b, g),
+            'GRB': (g, r, b),
+            'GBR': (g, b, r),
+            'BRG': (b, r, g),
+            'BGR': (b, g, r),
+        }
+        return sequences.get(self.color_format, (r, g, b))
 
     def set_color(self, rgb: Tuple[int, int, int]):
         """Set all LEDs to a single color (stop flashing)."""
         self.current_color = rgb
         self.is_flashing = False
         
-        if self.hardware_available:
-            for i in range(self.count):
-                self.strip.setPixelColor(i, self.Color(rgb[0], rgb[1], rgb[2]))
-            self.strip.show()
+        if self.hardware_available and self.strip:
+            try:
+                from rpi_ws281x import Color
+                converted = self._rgb_to_internal(rgb)
+                for i in range(self.count):
+                    self.strip.setPixelColor(i, Color(converted[0], converted[1], converted[2]))
+                self.strip.show()
+            except Exception as e:
+                logger.debug(f"Set color hardware error: {e}")
         
         # Console visualization
         viz = _visualize_led(rgb)
         logger.info(f"LED set color {viz} RGB{rgb}")
 
+    
     def turn_off(self):
         """Turn off all LEDs."""
         self.set_color((0, 0, 0))
@@ -141,11 +231,16 @@ class LEDController:
         # First half: on, second half: off
         is_on = position_in_cycle < self.flash_interval
 
-        if self.hardware_available:
-            color = self.current_color if is_on else (0, 0, 0)
-            for i in range(self.count):
-                self.strip.setPixelColor(i, self.Color(color[0], color[1], color[2]))
-            self.strip.show()
+        if self.hardware_available and self.strip:
+            try:
+                from rpi_ws281x import Color
+                color = self.current_color if is_on else (0, 0, 0)
+                converted = self._rgb_to_internal(color)
+                for i in range(self.count):
+                    self.strip.setPixelColor(i, Color(converted[0], converted[1], converted[2]))
+                self.strip.show()
+            except Exception as e:
+                logger.debug(f"Flash update hardware error: {e}")
         
         # Console visualization - show flash state occasionally
         if position_in_cycle < 0.05:  # Show state change at start of each phase
@@ -169,9 +264,22 @@ class LEDController:
 _led_controller = None
 
 
-def get_led_controller(pin: int = 18, count: int = 24, brightness: int = 255) -> LEDController:
-    """Get or create the LED controller singleton."""
+def get_led_controller(pin: int = 18, count: int = 4, brightness: int = 255, 
+                       color_format: str = 'RGB', pcb_version: int = 2) -> LEDController:
+    """
+    Get or create the LED controller singleton.
+    
+    Args:
+        pin: GPIO pin number (default 18 for Freenove tank)
+        count: Number of LEDs (default 4 for Freenove tank)
+        brightness: Max brightness 0-255 (default 255)
+        color_format: RGB sequence type ('RGB', 'RBG', 'GRB', etc)
+        pcb_version: PCB version 1 or 2 (auto-detected from Pi version)
+    
+    Returns:
+        LEDController singleton instance
+    """
     global _led_controller
     if _led_controller is None:
-        _led_controller = LEDController(pin, count, brightness)
+        _led_controller = LEDController(pin, count, brightness, color_format, pcb_version)
     return _led_controller
