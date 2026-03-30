@@ -100,6 +100,7 @@ class LEDController:
         # State tracking - only print when state actually changes
         self._last_color = None
         self._last_flash_state = None
+        self._last_flash_params = None  # Track (color, interval) to prevent repeated prints
 
         # Check hardware compatibility
         if not self._is_hardware_supported():
@@ -120,7 +121,7 @@ class LEDController:
         return True
 
     def _init_hardware(self):
-        """Initialize Freenove_RPI_WS281X wrapper with local dependencies."""
+        """Initialize appropriate LED wrapper based on Pi and PCB version (using Freenove mapping)."""
         try:
             # Construct import path for local lib_utils
             lib_utils_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib_utils')
@@ -130,39 +131,65 @@ class LEDController:
             if lib_utils_path not in sys.path:
                 sys.path.insert(0, lib_utils_path)
             
-            # Try to import Freenove wrapper from local lib_utils
-            try:
-                from freenove_rpi_ws281x import Freenove_RPI_WS281X
-                logger.debug(f"Using local Freenove_RPI_WS281X from {lib_utils_path}")
-            except (ImportError, ModuleNotFoundError) as e:
-                logger.debug(f"Local Freenove wrapper import failed ({e}), trying system package")
-                # Fallback would require Freenove to be installed system-wide
-                raise ImportError("Freenove_RPI_WS281X not available in local or system packages")
+            logger.debug(f"Initializing LEDs: Pi_v{self.pi_version}, PCB_v{self.pcb_version}")
             
-            # Initialize the actual Freenove wrapper
-            self.strip = Freenove_RPI_WS281X(
-                led_count=self.count,
-                bright=self.brightness,
-                sequence=self.color_format
-            )
-            
-            # Check initialization state
-            if self.strip.check_rpi_ws281x_state() == 0:
-                logger.info(f"LEDs initialized: pin=18, count={self.count}, "
-                          f"brightness={self.brightness}, format={self.color_format}, "
-                          f"Pi_v{self.pi_version}, PCB_v{self.pcb_version}")
-                self.hardware_available = True
-            else:
-                logger.warning("LED strip initialization failed - simulation mode")
+            # Use Freenove's exact mapping logic
+            if self.pcb_version == 1 and self.pi_version == 1:
+                # Old Pi + PCB v1: Use RPI_WS281X with RGB
+                logger.debug("Using RPI_WS281X wrapper (Pi < 5, PCB v1)")
+                try:
+                    from freenove_rpi_ws281x import Freenove_RPI_WS281X
+                    self.strip = Freenove_RPI_WS281X(
+                        led_count=self.count,
+                        bright=self.brightness,
+                        sequence=self.color_format  # RGB
+                    )
+                    if self.strip.check_rpi_ws281x_state() == 0:
+                        self.hardware_available = True
+                        logger.info(f"✓ LEDs (RPI_WS281X): pin=18, count={self.count}, "
+                                  f"brightness={self.brightness}, format=RGB, Pi_v1, PCB_v1")
+                    else:
+                        logger.error("RPI_WS281X initialization failed")
+                        self.hardware_available = False
+                except Exception as e:
+                    logger.error(f"RPI_WS281X initialization error: {e}")
+                    self.hardware_available = False
+                    
+            elif self.pcb_version == 2 and (self.pi_version == 1 or self.pi_version == 2):
+                # Any Pi + PCB v2: Use SPI with GRB
+                logger.debug(f"Using SPI wrapper (Pi v{self.pi_version}, PCB v2)")
+                try:
+                    from freenove_spi_ledpixel import Freenove_SPI_LedPixel
+                    self.strip = Freenove_SPI_LedPixel(
+                        count=self.count,
+                        bright=self.brightness,
+                        sequence='GRB'  # SPI PCB v2 uses GRB
+                    )
+                    if self.strip.check_spi_state() == 1:
+                        self.hardware_available = True
+                        logger.info(f"✓ LEDs (SPI): bus=0, count={self.count}, "
+                                  f"brightness={self.brightness}, format=GRB, Pi_v{self.pi_version}, PCB_v2")
+                    else:
+                        logger.error("SPI LED initialization failed - check /boot/firmware/config.txt for SPI enabled")
+                        self.hardware_available = False
+                except ImportError as e:
+                    logger.error(f"spidev import failed: {e} - install with: pip install spidev")
+                    self.hardware_available = False
+                except Exception as e:
+                    logger.error(f"SPI LED initialization error: {e}")
+                    self.hardware_available = False
+                    
+            elif self.pcb_version == 1 and self.pi_version == 2:
+                # Pi 5 + PCB v1: Not supported!
+                logger.error("PCB Version 1.0 is NOT supported on Raspberry PI 5!")
+                logger.error("You need PCB v2 for Pi 5. Check if LEDs connected to correct pins.")
                 self.hardware_available = False
-        except RuntimeError as hw_err:
-            logger.warning(f"LED hardware init failed: {hw_err} - simulation mode")
-            self.hardware_available = False
-        except ImportError as imp_err:
-            logger.warning(f"Freenove wrapper not available ({imp_err}) - simulation mode")
-            self.hardware_available = False
+            else:
+                logger.error(f"Unsupported combination: Pi_v{self.pi_version}, PCB_v{self.pcb_version}")
+                self.hardware_available = False
+                
         except Exception as e:
-            logger.warning(f"LED initialization error: {e} - simulation mode")
+            logger.error(f"LED initialization critical error: {type(e).__name__}: {e}", exc_info=True)
             self.hardware_available = False
 
 
@@ -206,14 +233,30 @@ class LEDController:
             rgb: Color tuple (R, G, B)
             interval: Flash interval in seconds
         """
-        self.current_color = rgb
-        self.is_flashing = True
-        self.flash_interval = interval
-        self.flash_start_time = time.time()
-        
-        # Console visualization
-        viz = _visualize_led(rgb)
-        logger.info(f"LED flash started {viz} RGB{rgb} @ {interval}s interval")
+        # Only print if flash parameters actually changed
+        current_params = (rgb, interval)
+        if self._last_flash_params != current_params:
+            self._last_flash_params = current_params
+            self._last_flash_state = None  # Reset state to print next toggle
+            
+            self.current_color = rgb
+            self.is_flashing = True
+            self.flash_interval = interval
+            self.flash_start_time = time.time()
+            
+            # Console visualization
+            viz = _visualize_led(rgb)
+            logger.info(f"LED flash started {viz} RGB{rgb} @ {interval}s interval")
+            
+            # Actually send to hardware
+            if self.hardware_available and self.strip:
+                try:
+                    self.strip.set_all_led_rgb(rgb)
+                except Exception as e:
+                    logger.debug(f"Flash hardware error: {e}")
+        else:
+            # Same params, just reset timer silently
+            self.flash_start_time = time.time()
 
     def update(self):
         """Called periodically to update flash state."""
