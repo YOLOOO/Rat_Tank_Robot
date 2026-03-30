@@ -254,9 +254,6 @@ class LEDController:
                     self.strip.set_all_led_rgb(rgb)
                 except Exception as e:
                     logger.debug(f"Flash hardware error: {e}")
-        else:
-            # Same params, just reset timer silently
-            self.flash_start_time = time.time()
 
     def update(self):
         """Called periodically to update flash state."""

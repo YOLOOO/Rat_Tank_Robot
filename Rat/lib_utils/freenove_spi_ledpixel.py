@@ -48,6 +48,11 @@ class Freenove_SPI_LedPixel(object):
         """Return the current SPI initialization state."""
         return self.led_init_state
 
+    def spi_gpio_info(self):
+        """Print GPIO pin information for the SPI bus."""
+        if self.bus == 0:
+            print("SPI0-MOSI: GPIO10(WS2812-PIN)  SPI0-MISO: GPIO9  SPI0-SCLK: GPIO11  SPI0-CE0: GPIO8  SPI0-CE1: GPIO7")
+
     def led_close(self):
         """Turn off all LEDs and close SPI connection."""
         self.set_all_led_rgb([0, 0, 0])
@@ -140,17 +145,37 @@ class Freenove_SPI_LedPixel(object):
             self.set_led_rgb_data(i, color)
         self.show()
 
-    def show(self):
-        """Update the LED strip with the current color data via SPI."""
-        try:
-            # Prepare SPI data
-            data = []
-            for i in range(self.get_led_count()):
-                data.append(self.led_color[i * 3])
-                data.append(self.led_color[i * 3 + 1])
-                data.append(self.led_color[i * 3 + 2])
-            
-            if self.led_init_state == 1 and hasattr(self, 'spi'):
-                self.spi.writebytes(data)
-        except Exception as e:
-            pass
+    def show(self, mode=1):
+        """Update LED display with current color data. Mode 1=8-bit, 0=4-bit."""
+        if mode == 1:
+            self.write_ws2812_numpy8()
+        else:
+            self.write_ws2812_numpy4()
+
+    def write_ws2812_numpy8(self):
+        """Convert color data to WS2812 SPI format (8-bit encoding)."""
+        d = numpy.array(self.led_color).ravel()
+        tx = numpy.zeros(len(d) * 8, dtype=numpy.uint8)
+        for ibit in range(8):
+            # T0H=1, T0L=7, T1H=5, T1L=3
+            # 0b11111000 = T1 (0.78125us), 0b10000000 = T0 (0.15625us)
+            tx[7 - ibit::8] = ((d >> ibit) & 1) * 0x78 + 0x80
+        if self.led_init_state != 0:
+            if self.bus == 0:
+                # Send at 6.4 MHz for SPI bus 0
+                self.spi.xfer(tx.tolist(), int(8 / 1.25e-6))
+            else:
+                # Send at 8 MHz for other buses
+                self.spi.xfer(tx.tolist(), int(8 / 1.0e-6))
+
+    def write_ws2812_numpy4(self):
+        """Convert color data to WS2812 SPI format (4-bit encoding)."""
+        d = numpy.array(self.led_color).ravel()
+        tx = numpy.zeros(len(d) * 4, dtype=numpy.uint8)
+        for ibit in range(4):
+            tx[3 - ibit::4] = ((d >> (2 * ibit + 1)) & 1) * 0x60 + ((d >> (2 * ibit + 0)) & 1) * 0x06 + 0x88
+        if self.led_init_state != 0:
+            if self.bus == 0:
+                self.spi.xfer(tx.tolist(), int(4 / 1.25e-6))
+            else:
+                self.spi.xfer(tx.tolist(), int(4 / 1.0e-6))
