@@ -153,7 +153,7 @@ class Behavior(BaseBehavior):
 
     def _test_servo(self, brain) -> bool:
         """
-        Test servo motion control.
+        Test servo motion control (reference API).
         
         Phases:
         - Motion 1: Servo 0 sweep (3 cycles)
@@ -167,8 +167,8 @@ class Behavior(BaseBehavior):
         if self.phase_step < 3:
             cycle = self.phase_step
             logger.info(f"Servo Test: Motion 1 - Servo 0 sweep (cycle {cycle + 1}/3)")
-            servo_controller.sweep_servo(channel=0, step=5, delay=0.02)
-            servo_controller.center_servo(0)
+            servo_controller.sweep_servo(channel='0', start_angle=90, end_angle=150, step=5, delay=0.02)
+            servo_controller.setServoAngle('0', 90)
             self.phase_step += 1
             return True
         
@@ -176,8 +176,8 @@ class Behavior(BaseBehavior):
         elif self.phase_step < 6:
             cycle = self.phase_step - 3
             logger.info(f"Servo Test: Motion 2 - Servo 1 sweep (cycle {cycle + 1}/3)")
-            servo_controller.sweep_servo(channel=1, step=5, delay=0.02)
-            servo_controller.center_servo(1)
+            servo_controller.sweep_servo(channel='1', start_angle=90, end_angle=150, step=5, delay=0.02)
+            servo_controller.setServoAngle('1', 90)
             self.phase_step += 1
             return True
         
@@ -186,18 +186,20 @@ class Behavior(BaseBehavior):
             cycle = self.phase_step - 6
             logger.info(f"Servo Test: Motion 3 - Combined movement (cycle {cycle + 1}/3)")
             
-            # Pan and tilt together
-            for angle in range(90, 150, 10):
-                servo_controller.set_servo_angle(0, angle)
-                servo_controller.set_servo_angle(1, 150 - angle)
-                time.sleep(0.05)
-            for angle in range(150, 89, -10):
-                servo_controller.set_servo_angle(0, angle)
-                servo_controller.set_servo_angle(1, 150 - angle)
-                time.sleep(0.05)
+            # Pan and tilt together (mimic reference code flow)
+            for i in range(90, 150, 1):
+                servo_controller.setServoAngle('0', i)
+                time.sleep(0.01)
+            for i in range(140, 90, -1):
+                servo_controller.setServoAngle('1', i)
+                time.sleep(0.01)
+            for i in range(90, 140, 1):
+                servo_controller.setServoAngle('1', i)
+                time.sleep(0.01)
+            for i in range(150, 90, -1):
+                servo_controller.setServoAngle('0', i)
+                time.sleep(0.01)
             
-            servo_controller.center_servo(0)
-            servo_controller.center_servo(1)
             self.phase_step += 1
             return True
         
@@ -210,24 +212,19 @@ class Behavior(BaseBehavior):
 
     def _test_motor(self, brain) -> bool:
         """
-        Test motor movement control.
+        Test motor movement control (reference API).
         
-        Phases (2 seconds each):
-        - Forward
-        - Backward
-        - Spin left
-        - Spin right
-        - Stop
+        Uses duty cycles -4095 to 4095 matching Code/Server reference.
         """
         self.current_phase_name = "MOTOR"
         motor_controller = brain.motor
         
         movements = [
-            ("Forward", lambda: motor_controller.forward(speed=150)),
-            ("Backward", lambda: motor_controller.backward(speed=150)),
-            ("Spin Left", lambda: motor_controller.spin_left(speed=150)),
-            ("Spin Right", lambda: motor_controller.spin_right(speed=150)),
-            ("Stop", lambda: motor_controller.stop()),
+            ("Forward", lambda: motor_controller.setMotorModel(2000, 2000)),
+            ("Backward", lambda: motor_controller.setMotorModel(-2000, -2000)),
+            ("Spin Left", lambda: motor_controller.setMotorModel(-2000, 2000)),
+            ("Spin Right", lambda: motor_controller.setMotorModel(2000, -2000)),
+            ("Stop", lambda: motor_controller.setMotorModel(0, 0)),
         ]
         
         if self.phase_step < len(movements):
@@ -249,7 +246,7 @@ class Behavior(BaseBehavior):
         # Motor test complete - all tests done
         else:
             logger.info("Motor tests completed! All hardware tests finished!")
-            motor_controller.stop()
+            motor_controller.setMotorModel(0, 0)
             brain.led.set_color((0, 255, 0))  # Green = success
             time.sleep(1)
             brain.led.turn_off()
