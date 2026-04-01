@@ -7,7 +7,7 @@ Supports:
 
 import logging
 import time
-from ..config import (
+from config import (
     SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2,
     SERVO_CH0_MIN, SERVO_CH0_MAX,
     SERVO_CH1_MIN, SERVO_CH1_MAX,
