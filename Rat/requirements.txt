@@ -2,8 +2,9 @@
 # Install on Raspberry Pi with: pip3 install -r requirements.txt
 
 # GPIO Control (Raspberry Pi)
-RPi.GPIO>=0.7.0
-# or use: gpiozero>=2.0
+gpiozero>=2.0
+# For servo control on Pi 5 + PCB v2: pigpio with daemon
+pigpio>=1.78
 
 # NeoPixel / WS2812 LED Control
 adafruit-neopixel>=1.12.0

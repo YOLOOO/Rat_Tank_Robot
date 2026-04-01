@@ -4,6 +4,10 @@
 # ===============
 # Starts the robot brain server on Raspberry Pi
 #
+# IMPORTANT for Pi 5 + PCB v2:
+# The pigpiod daemon must be running for servo control!
+# This script will attempt to start it if needed.
+#
 
 set -e
 
@@ -17,6 +21,18 @@ cd "$DIR"
 
 # Optional: Set up Python path
 export PYTHONPATH="${PYTHONPATH}:$DIR"
+
+# For Pi 5 + PCB v2: Start pigpiod daemon if not running
+echo "Checking pigpiod daemon (required for servo control)..."
+if ! pgrep -x "pigpiod" > /dev/null; then
+    echo "Starting pigpiod daemon..."
+    sudo pigpiod -l -s 1 >/dev/null 2>&1 &
+    sleep 2
+    echo "✓ pigpiod daemon started"
+else
+    echo "✓ pigpiod daemon already running"
+fi
+echo ""
 
 # Start the brain in background
 echo "Starting RAT BRAIN server..."
