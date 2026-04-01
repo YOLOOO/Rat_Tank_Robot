@@ -19,9 +19,7 @@ MAX_COMMAND_QUEUE_SIZE = 100
 # Format: {name: (module_path, color_tuple, display_order)}
 BEHAVIORS = {
     "IDLE": (None, (0, 255, 0), 0),  # Green - default idle state
-    "DANCE": ("behavior_scripts.dance_demo", (255, 0, 255), 1),  # Magenta
-    "PATROL": ("behavior_scripts.patrol", (0, 0, 255), 2),  # Blue
-    "SCAN": ("behavior_scripts.toy_car_picker", (255, 255, 0), 3),  # Yellow
+    "TEST": ("behavior_scripts.test", (255, 165, 0), 1),  # Orange - hardware testing
 }
 
 # ============================================================================
@@ -66,6 +64,31 @@ MOTOR_PWM_FREQ = 1000  # Hz
 MOTOR_SPEED_NORMAL = 100  # 0-255
 MOTOR_SPEED_SLOW = 50
 MOTOR_SPEED_FAST = 200
+
+# ============================================================================
+# SERVO CONFIGURATION
+# ============================================================================
+# Pin assignments for servo control (PCB v2)
+SERVO_CHANNEL_0 = 7   # GPIO 7 - servo 0 (e.g., pan)
+SERVO_CHANNEL_1 = 8   # GPIO 8 - servo 1 (e.g., tilt)
+SERVO_CHANNEL_2 = 25  # GPIO 25 - servo 2 (optional, reserved)
+SERVO_PWM_FREQ = 50   # Hz (standard servo frequency)
+
+# Default servo angles (0-180)
+SERVO_CENTER_ANGLE = 90
+SERVO_MIN_ANGLE = 0
+SERVO_MAX_ANGLE = 180
+
+# Channel-specific angle limits (if different)
+SERVO_CH0_MIN = 90
+SERVO_CH0_MAX = 150
+SERVO_CH1_MIN = 90
+SERVO_CH1_MAX = 150
+SERVO_CH2_MIN = 0
+SERVO_CH2_MAX = 180
+
+# PCB version for servo control (same as LED PCB version)
+SERVO_PCB_VERSION = 2
 
 # ============================================================================
 # SENSOR CONFIGURATION

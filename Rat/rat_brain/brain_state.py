@@ -18,10 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
     BEHAVIORS, MISSIONS, MENU_ITEMS, STATE_UPDATE_INTERVAL, DEBUG,
-    LED_PIN, LED_COUNT, LED_BRIGHTNESS, LED_COLOR_FORMAT, LED_PCB_VERSION
+    LED_PIN, LED_COUNT, LED_BRIGHTNESS, LED_COLOR_FORMAT, LED_PCB_VERSION,
+    SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2,
+    SERVO_CH0_MIN, SERVO_CH0_MAX, SERVO_CH1_MIN, SERVO_CH1_MAX,
+    SERVO_CH2_MIN, SERVO_CH2_MAX, SERVO_PCB_VERSION
 )
 from rat_brain.control_receiver_server import get_command_server
-from common_hardware import get_led_controller, get_motor_controller
+from common_hardware import get_led_controller, get_motor_controller, get_servo_controller
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO)
@@ -54,6 +57,8 @@ class RatBrain:
         
         self.motor_controller = get_motor_controller()
         
+        self.servo_controller = get_servo_controller()
+        
         self.selection_index = 0
         self.running_behavior = None
         self.behavior_start_time = None
@@ -65,6 +70,22 @@ class RatBrain:
         self._load_missions()
         
         logger.info("RatBrain initialized")
+
+    # Convenience properties for easier access in behaviors
+    @property
+    def led(self):
+        """Shorthand for LED controller."""
+        return self.led_controller
+    
+    @property
+    def motor(self):
+        """Shorthand for motor controller."""
+        return self.motor_controller
+    
+    @property
+    def servo(self):
+        """Shorthand for servo controller."""
+        return self.servo_controller
 
     def _load_behaviors(self):
         """Load behavior modules."""
