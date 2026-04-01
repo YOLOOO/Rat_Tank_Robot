@@ -75,14 +75,9 @@ class Behavior(BaseBehavior):
 
     def _test_led(self, brain) -> bool:
         """
-        Test LED functionality with different colors and effects.
+        Test LED functionality (reference flow).
         
-        Phases:
-        - Step 0-6: Individual colors (0.5s each)
-        - Step 7: LED off (1s)
-        - Step 8-12: Flash red (0.5s * 5)
-        - Step 13-17: Flash green (0.3s * 5)
-        - Step 18-21: Pulse blue (3 cycles)
+        Each color shown for 1 second before moving to next.
         """
         self.current_phase_name = "LED"
         colors = [
@@ -95,7 +90,7 @@ class Behavior(BaseBehavior):
             ((255, 0, 255), "Magenta"),
         ]
         
-        # Individual color tests
+        # Individual color tests - 1 second each
         if self.phase_step < len(colors):
             color, name = colors[self.phase_step]
             brain.led.set_color(color)
@@ -103,47 +98,7 @@ class Behavior(BaseBehavior):
             self.phase_step += 1
             return True
         
-        # LED off
-        elif self.phase_step == len(colors):
-            brain.led.turn_off()
-            logger.info("LED Test: Off")
-            self.phase_step += 1
-            return True
-        
-        # Flash red
-        elif self.phase_step <= len(colors) + 5:
-            if self.phase_step == len(colors) + 1:
-                brain.led.flash((255, 0, 0), interval=0.5)
-                logger.info("LED Test: Flash red...")
-            brain.led.update()
-            self.phase_step += 1
-            return True
-        
-        # Flash green
-        elif self.phase_step <= len(colors) + 10:
-            if self.phase_step == len(colors) + 6:
-                brain.led.flash((0, 255, 0), interval=0.3)
-                logger.info("LED Test: Flash green...")
-            brain.led.update()
-            self.phase_step += 1
-            return True
-        
-        # Pulse blue
-        elif self.phase_step <= len(colors) + 16:
-            pulse_cycle = (self.phase_step - len(colors) - 10) // 3
-            pulse_step = (self.phase_step - len(colors) - 10) % 3
-            
-            if pulse_step == 0:
-                brain.led.set_color((0, 0, 255))
-                if pulse_cycle == 0:
-                    logger.info("LED Test: Pulse blue...")
-            elif pulse_step == 1:
-                brain.led.turn_off()
-            
-            self.phase_step += 1
-            return True
-        
-        # LED test complete - move to servo test
+        # All color tests done - move to servo
         else:
             brain.led.turn_off()
             logger.info("LED tests completed! Moving to servo tests...")
@@ -155,51 +110,54 @@ class Behavior(BaseBehavior):
         """
         Test servo motion control (reference API).
         
-        Phases:
-        - Motion 1: Servo 0 sweep (3 cycles)
-        - Motion 2: Servo 1 sweep (3 cycles)
-        - Motion 3: Combined servo choreography (3 cycles)
+        Exactly matches Code/Server/test.py servo test:
+        - Smooth 1-degree steps at 0.01s intervals
+        - 4 sweep movements repeated 3 times
         """
         self.current_phase_name = "SERVO"
         servo_controller = brain.servo
         
-        # Motion 1: Servo 0 sweep - 3 cycles
+        # Motion 1: Servo 0 sweep 90→150 (3 cycles)
         if self.phase_step < 3:
             cycle = self.phase_step
-            logger.info(f"Servo Test: Motion 1 - Servo 0 sweep (cycle {cycle + 1}/3)")
-            servo_controller.sweep_servo(channel='0', start_angle=90, end_angle=150, step=5, delay=0.02)
-            servo_controller.setServoAngle('0', 90)
-            self.phase_step += 1
-            return True
-        
-        # Motion 2: Servo 1 sweep - 3 cycles
-        elif self.phase_step < 6:
-            cycle = self.phase_step - 3
-            logger.info(f"Servo Test: Motion 2 - Servo 1 sweep (cycle {cycle + 1}/3)")
-            servo_controller.sweep_servo(channel='1', start_angle=90, end_angle=150, step=5, delay=0.02)
-            servo_controller.setServoAngle('1', 90)
-            self.phase_step += 1
-            return True
-        
-        # Motion 3: Combined choreography - 3 cycles
-        elif self.phase_step < 9:
-            cycle = self.phase_step - 6
-            logger.info(f"Servo Test: Motion 3 - Combined movement (cycle {cycle + 1}/3)")
-            
-            # Pan and tilt together (mimic reference code flow)
+            logger.info(f"Servo Test: Servo 0 sweep (cycle {cycle + 1}/3)")
+            # Smooth sweep: 1 degree steps, 0.01s delay = 0.6s per sweep
             for i in range(90, 150, 1):
                 servo_controller.setServoAngle('0', i)
                 time.sleep(0.01)
+            self.phase_step += 1
+            return True
+        
+        # Motion 2: Servo 1 sweep 140→90 (3 cycles)
+        elif self.phase_step < 6:
+            cycle = self.phase_step - 3
+            logger.info(f"Servo Test: Servo 1 sweep down (cycle {cycle + 1}/3)")
+            # Smooth sweep: 1 degree steps, 0.01s delay
             for i in range(140, 90, -1):
                 servo_controller.setServoAngle('1', i)
                 time.sleep(0.01)
+            self.phase_step += 1
+            return True
+        
+        # Motion 3: Servo 1 sweep 90→140 (3 cycles)
+        elif self.phase_step < 9:
+            cycle = self.phase_step - 6
+            logger.info(f"Servo Test: Servo 1 sweep up (cycle {cycle + 1}/3)")
+            # Smooth sweep: 1 degree steps, 0.01s delay
             for i in range(90, 140, 1):
                 servo_controller.setServoAngle('1', i)
                 time.sleep(0.01)
+            self.phase_step += 1
+            return True
+        
+        # Motion 4: Servo 0 sweep 150→90 (3 cycles)
+        elif self.phase_step < 12:
+            cycle = self.phase_step - 9
+            logger.info(f"Servo Test: Servo 0 sweep down (cycle {cycle + 1}/3)")
+            # Smooth sweep: 1 degree steps, 0.01s delay
             for i in range(150, 90, -1):
                 servo_controller.setServoAngle('0', i)
                 time.sleep(0.01)
-            
             self.phase_step += 1
             return True
         
