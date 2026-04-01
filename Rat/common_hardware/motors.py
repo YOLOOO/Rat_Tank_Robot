@@ -2,6 +2,7 @@
 Motor Hardware Abstraction
 ==========================
 Controls tank robot movement (2 motors, left and right).
+Uses gpiozero.Motor for reliable GPIO control.
 """
 
 import logging
@@ -14,145 +15,147 @@ class MotorController:
     """
     Abstraction for tank motor control.
     Tank has two independent motors (left and right).
+    Uses gpiozero.Motor for hardware control.
     """
 
     def __init__(
         self,
-        left_forward_pin: int = 12,
-        left_backward_pin: int = 11,
-        right_forward_pin: int = 8,
-        right_backward_pin: int = 7,
-        pwm_freq: int = 1000,
+        left_forward_pin: int = 24,
+        left_backward_pin: int = 23,
+        right_forward_pin: int = 5,
+        right_backward_pin: int = 6,
     ):
         """
-        Initialize motor controller.
+        Initialize motor controller using gpiozero.
         
         Args:
             left_forward_pin: GPIO pin for left motor forward
             left_backward_pin: GPIO pin for left motor backward
             right_forward_pin: GPIO pin for right motor forward
             right_backward_pin: GPIO pin for right motor backward
-            pwm_freq: PWM frequency in Hz
         """
         self.left_forward_pin = left_forward_pin
         self.left_backward_pin = left_backward_pin
         self.right_forward_pin = right_forward_pin
         self.right_backward_pin = right_backward_pin
-        self.pwm_freq = pwm_freq
 
         self.left_speed = 0
         self.right_speed = 0
         self.hardware_available = False
+        self.left_motor = None
+        self.right_motor = None
 
-        # Try to import GPIO library
+        # Try to import and initialize gpiozero Motors
         try:
-            import RPi.GPIO as GPIO
-            self.GPIO = GPIO
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
+            from gpiozero import Motor
             
-            # Setup pins as output
-            for pin in [left_forward_pin, left_backward_pin, right_forward_pin, right_backward_pin]:
-                GPIO.setup(pin, GPIO.OUT)
-            
-            # Setup PWM
-            self.left_fwd_pwm = GPIO.PWM(left_forward_pin, pwm_freq)
-            self.left_bwd_pwm = GPIO.PWM(left_backward_pin, pwm_freq)
-            self.right_fwd_pwm = GPIO.PWM(right_forward_pin, pwm_freq)
-            self.right_bwd_pwm = GPIO.PWM(right_backward_pin, pwm_freq)
-            
-            self.left_fwd_pwm.start(0)
-            self.left_bwd_pwm.start(0)
-            self.right_fwd_pwm.start(0)
-            self.right_bwd_pwm.start(0)
+            # Initialize motors with gpiozero
+            # Motor(forward_pin, backward_pin)
+            self.left_motor = Motor(left_forward_pin, left_backward_pin)
+            self.right_motor = Motor(right_forward_pin, right_backward_pin)
             
             self.hardware_available = True
-            logger.info("Motor controller initialized")
+            logger.info(f"✓ Motor controller initialized (gpiozero)")
+            logger.debug(f"  Left: pins {left_forward_pin}/{left_backward_pin}")
+            logger.debug(f"  Right: pins {right_forward_pin}/{right_backward_pin}")
         except ImportError:
-            logger.warning("RPi.GPIO not available - running in simulation mode")
-        except RuntimeError as hw_err:
-            logger.warning(f"GPIO initialization failed: {hw_err} - running in simulation mode")
+            logger.warning("gpiozero not available - running in simulation mode")
         except Exception as e:
-            logger.warning(f"Motor controller error: {e} - running in simulation mode")
+            logger.warning(f"Motor initialization error: {e} - running in simulation mode")
 
-    def _set_motor(self, fwd_pwm, bwd_pwm, speed: int):
+    def forward(self, speed: int = 150):
         """
-        Set a single motor speed and direction.
+        Move forward at given speed (0-255).
         
         Args:
-            fwd_pwm: Forward PWM object
-            bwd_pwm: Backward PWM object
-            speed: -255 to 255 (negative = backward)
+            speed: Speed from 0-255
         """
-        speed = max(-255, min(255, speed))  # Clamp to range
-
-        if not self.hardware_available:
-            return
-
-        if speed > 0:  # Forward
-            fwd_pwm.ChangeDutyCycle(speed)
-            bwd_pwm.ChangeDutyCycle(0)
-        elif speed < 0:  # Backward
-            fwd_pwm.ChangeDutyCycle(0)
-            bwd_pwm.ChangeDutyCycle(-speed)
-        else:  # Stop
-            fwd_pwm.ChangeDutyCycle(0)
-            bwd_pwm.ChangeDutyCycle(0)
-
-    def forward(self, speed: int = 100):
-        """Move forward at given speed (0-255)."""
         self.left_speed = speed
         self.right_speed = speed
-        self._set_motor(self.left_fwd_pwm, self.left_bwd_pwm, speed)
-        self._set_motor(self.right_fwd_pwm, self.right_bwd_pwm, speed)
-        logger.debug(f"Forward: speed={speed}")
+        
+        if self.hardware_available and self.left_motor and self.right_motor:
+            # gpiozero Motor.forward() takes value 0.0-1.0
+            duty = speed / 255.0
+            self.left_motor.forward(duty)
+            self.right_motor.forward(duty)
+        
+        logger.info(f"Motor: Forward (speed={speed})")
 
-    def backward(self, speed: int = 100):
-        """Move backward at given speed (0-255)."""
-        self.forward(-speed)
-        logger.debug(f"Backward: speed={speed}")
+    def backward(self, speed: int = 150):
+        """
+        Move backward at given speed (0-255).
+        
+        Args:
+            speed: Speed from 0-255
+        """
+        self.left_speed = -speed
+        self.right_speed = -speed
+        
+        if self.hardware_available and self.left_motor and self.right_motor:
+            # gpiozero Motor.backward() takes value 0.0-1.0
+            duty = speed / 255.0
+            self.left_motor.backward(duty)
+            self.right_motor.backward(duty)
+        
+        logger.info(f"Motor: Backward (speed={speed})")
 
-    def spin_left(self, speed: int = 100):
-        """Spin left at given speed (0-255)."""
+    def spin_left(self, speed: int = 150):
+        """
+        Spin left (left backward, right forward).
+        
+        Args:
+            speed: Speed from 0-255
+        """
         self.left_speed = -speed
         self.right_speed = speed
-        self._set_motor(self.left_fwd_pwm, self.left_bwd_pwm, -speed)
-        self._set_motor(self.right_fwd_pwm, self.right_bwd_pwm, speed)
-        logger.debug(f"Spin left: speed={speed}")
+        
+        if self.hardware_available and self.left_motor and self.right_motor:
+            duty = speed / 255.0
+            self.left_motor.backward(duty)
+            self.right_motor.forward(duty)
+        
+        logger.info(f"Motor: Spin left (speed={speed})")
 
-    def spin_right(self, speed: int = 100):
-        """Spin right at given speed (0-255)."""
+    def spin_right(self, speed: int = 150):
+        """
+        Spin right (left forward, right backward).
+        
+        Args:
+            speed: Speed from 0-255
+        """
         self.left_speed = speed
         self.right_speed = -speed
-        self._set_motor(self.left_fwd_pwm, self.left_bwd_pwm, speed)
-        self._set_motor(self.right_fwd_pwm, self.right_bwd_pwm, -speed)
-        logger.debug(f"Spin right: speed={speed}")
+        
+        if self.hardware_available and self.left_motor and self.right_motor:
+            duty = speed / 255.0
+            self.left_motor.forward(duty)
+            self.right_motor.backward(duty)
+        
+        logger.info(f"Motor: Spin right (speed={speed})")
 
     def stop(self):
         """Stop all motors immediately."""
         self.left_speed = 0
         self.right_speed = 0
-        self._set_motor(self.left_fwd_pwm, self.left_bwd_pwm, 0)
-        self._set_motor(self.right_fwd_pwm, self.right_bwd_pwm, 0)
-        logger.debug("Stopped")
+        
+        if self.hardware_available and self.left_motor and self.right_motor:
+            self.left_motor.stop()
+            self.right_motor.stop()
+        
+        logger.info("Motor: Stop")
 
     def cleanup(self):
-        """Cleanup GPIO resources."""
+        """Cleanup motor resources."""
         self.stop()
         if self.hardware_available:
             try:
-                if hasattr(self, 'left_fwd_pwm'):
-                    self.left_fwd_pwm.stop()
-                if hasattr(self, 'left_bwd_pwm'):
-                    self.left_bwd_pwm.stop()
-                if hasattr(self, 'right_fwd_pwm'):
-                    self.right_fwd_pwm.stop()
-                if hasattr(self, 'right_bwd_pwm'):
-                    self.right_bwd_pwm.stop()
-                self.GPIO.cleanup()
+                if self.left_motor:
+                    self.left_motor.close()
+                if self.right_motor:
+                    self.right_motor.close()
                 logger.info("Motor controller cleaned up")
             except Exception as e:
-                logger.warning(f"Error during cleanup: {e}")
+                logger.warning(f"Error during motor cleanup: {e}")
 
 
 # Singleton instance
@@ -168,13 +171,11 @@ def get_motor_controller() -> MotorController:
             MOTOR_LEFT_BACKWARD,
             MOTOR_RIGHT_FORWARD,
             MOTOR_RIGHT_BACKWARD,
-            MOTOR_PWM_FREQ,
         )
         _motor_controller = MotorController(
             MOTOR_LEFT_FORWARD,
             MOTOR_LEFT_BACKWARD,
             MOTOR_RIGHT_FORWARD,
             MOTOR_RIGHT_BACKWARD,
-            MOTOR_PWM_FREQ,
         )
     return _motor_controller
