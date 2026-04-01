@@ -53,11 +53,12 @@ LED_COLORS = {
 # ============================================================================
 # MOTOR CONFIGURATION
 # ============================================================================
-# Pin assignments for motor control
-MOTOR_LEFT_FORWARD = 12
-MOTOR_LEFT_BACKWARD = 11
-MOTOR_RIGHT_FORWARD = 8
-MOTOR_RIGHT_BACKWARD = 7
+# Pin assignments for motor control (gpiozero.Motor uses forward/backward pin pairs)
+# Reference: Code/Server/motor.py
+MOTOR_LEFT_FORWARD = 24
+MOTOR_LEFT_BACKWARD = 23
+MOTOR_RIGHT_FORWARD = 5
+MOTOR_RIGHT_BACKWARD = 6
 MOTOR_PWM_FREQ = 1000  # Hz
 
 # Default motor speeds
