@@ -268,3 +268,15 @@ class ServoController:
                 logger.info("pigpio connection closed")
             except:
                 pass
+
+
+# Singleton factory pattern
+_servo_controller = None
+
+
+def get_servo_controller() -> ServoController:
+    """Get or create the servo controller singleton."""
+    global _servo_controller
+    if _servo_controller is None:
+        _servo_controller = ServoController()
+    return _servo_controller
