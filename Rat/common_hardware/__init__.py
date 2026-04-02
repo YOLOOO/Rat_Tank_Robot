@@ -32,7 +32,7 @@ def get_servo_controller():
     """Get or create the servo controller singleton."""
     global _servo_controller
     if _servo_controller is None:
-        _servo_controller = PigpioServo(SERVO_PCB_VERSION, SERVO_PWM_FREQ)
+        _servo_controller = PigpioServo()
     return _servo_controller
 
 __all__ = [
