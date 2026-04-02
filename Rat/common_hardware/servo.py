@@ -1,17 +1,18 @@
 import pigpio
+from config import SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2, SERVO_PWM_FREQ
 class PigpioServo:
     def __init__(self):
         # Initialize the PigpioServo instance
-        self.channel1 = 7  # GPIO pin for channel 1
-        self.channel2 = 8  # GPIO pin for channel 2
-        self.channel3 = 25  # GPIO pin for channel 3
+        self.channel1 = SERVO_CHANNEL_0  # GPIO pin for channel 1
+        self.channel2 = SERVO_CHANNEL_1  # GPIO pin for channel 2
+        self.channel3 = SERVO_CHANNEL_2  # GPIO pin for channel 3
         self.PwmServo = pigpio.pi()  # Initialize the pigpio library
         self.PwmServo.set_mode(self.channel1, pigpio.OUTPUT)  # Set channel 1 as output
         self.PwmServo.set_mode(self.channel2, pigpio.OUTPUT)  # Set channel 2 as output
         self.PwmServo.set_mode(self.channel3, pigpio.OUTPUT)  # Set channel 3 as output
-        self.PwmServo.set_PWM_frequency(self.channel1, 50)  # Set PWM frequency for channel 1 to 50 Hz
-        self.PwmServo.set_PWM_frequency(self.channel2, 50)  # Set PWM frequency for channel 2 to 50 Hz
-        self.PwmServo.set_PWM_frequency(self.channel3, 50)  # Set PWM frequency for channel 3 to 50 Hz
+        self.PwmServo.set_PWM_frequency(self.channel1, SERVO_PWM_FREQ)  # Set PWM frequency for channel 1 to 50 Hz
+        self.PwmServo.set_PWM_frequency(self.channel2, SERVO_PWM_FREQ)  # Set PWM frequency for channel 2 to 50 Hz
+        self.PwmServo.set_PWM_frequency(self.channel3, SERVO_PWM_FREQ)  # Set PWM frequency for channel 3 to 50 Hz
         self.PwmServo.set_PWM_range(self.channel1, 4000)  # Set PWM range for channel 1 to 4000
         self.PwmServo.set_PWM_range(self.channel2, 4000)  # Set PWM range for channel 2 to 4000
         self.PwmServo.set_PWM_range(self.channel3, 4000)  # Set PWM range for channel 3 to 4000
@@ -25,42 +26,44 @@ class PigpioServo:
         elif channel == '2':
             self.PwmServo.set_PWM_dutycycle(self.channel3, 80 + (400 / 180) * angle)  # Calculate and set PWM duty cycle for channel 3
 
-from gpiozero import AngularServo
-class GpiozeroServo:
-    def __init__(self):
-        # Initialize the GpiozeroServo instance
-        self.channel1 = 7  # GPIO pin for channel 1
-        self.channel2 = 8  # GPIO pin for channel 2
-        self.channel3 = 25  # GPIO pin for channel 3
-        self.myCorrection = 0.0  # Correction value for pulse width
-        self.maxPW = (2.5 + self.myCorrection) / 1000  # Maximum pulse width
-        self.minPW = (0.5 - self.myCorrection) / 1000  # Minimum pulse width
-        self.servo1 = AngularServo(self.channel1, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 1
-        self.servo2 = AngularServo(self.channel2, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 2
-        self.servo3 = AngularServo(self.channel3, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 3
+# from gpiozero import AngularServo
+# from config import SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2
+# class GpiozeroServo:
+#     def __init__(self):
+#         # Initialize the GpiozeroServo instance
+#         self.channel1 = SERVO_CHANNEL_0  # GPIO pin for channel 1
+#         self.channel2 = SERVO_CHANNEL_1  # GPIO pin for channel 2
+#         self.channel3 = SERVO_CHANNEL_2  # GPIO pin for channel 3
+#         self.myCorrection = 0.0  # Correction value for pulse width
+#         self.maxPW = (2.5 + self.myCorrection) / 1000  # Maximum pulse width
+#         self.minPW = (0.5 - self.myCorrection) / 1000  # Minimum pulse width
+#         self.servo1 = AngularServo(self.channel1, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 1
+#         self.servo2 = AngularServo(self.channel2, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 2
+#         self.servo3 = AngularServo(self.channel3, initial_angle=0, min_angle=0, max_angle=180, min_pulse_width=self.minPW, max_pulse_width=self.maxPW)  # Initialize servo 3
 
-    def setServoPwm(self, channel, angle):
-        # Set the angle for the specified channel
-        if channel == '0':
-            self.servo1.angle = angle  # Set angle for servo 1
-        elif channel == '1':
-            self.servo2.angle = angle  # Set angle for servo 2
-        elif channel == '2':
-            self.servo3.angle = angle  # Set angle for servo 3
+#     def setServoPwm(self, channel, angle):
+#         # Set the angle for the specified channel
+#         if channel == '0':
+#             self.servo1.angle = angle  # Set angle for servo 1
+#         elif channel == '1':
+#             self.servo2.angle = angle  # Set angle for servo 2
+#         elif channel == '2':
+#             self.servo3.angle = angle  # Set angle for servo 3
 
 from rpi_hardware_pwm import HardwarePWM
+from config import SERVO_PCB_VERSION, SERVO_HZ
 class HardwareServo:
-    def __init__(self, pcb_version):
+    def __init__(self, SERVO_PCB_VERSION, SERVO_HZ):
         # Initialize the HardwareServo instance
-        self.pcb_version = pcb_version  # PCB version
+        self.pcb_version = SERVO_PCB_VERSION  # PCB version
         self.pwm_gpio12 = None  # PWM object for GPIO 12
         self.pwm_gpio13 = None  # PWM object for GPIO 13
         if self.pcb_version == 1:
-            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=50, chip=0)  # Initialize PWM for GPIO 12 on chip 0
-            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=50, chip=0)  # Initialize PWM for GPIO 13 on chip 0
+            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 12 on chip 0
+            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 13 on chip 0
         elif self.pcb_version == 2:
-            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=50, chip=0)  # Initialize PWM for GPIO 12 on chip 2
-            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=50, chip=0)  # Initialize PWM for GPIO 13 on chip 2
+            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 12 on chip 2
+            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 13 on chip 2
         self.pwm_gpio12.start(0)  # Start PWM for GPIO 12 with 0% duty cycle
         self.pwm_gpio13.start(0)  # Start PWM for GPIO 13 with 0% duty cycle
 
