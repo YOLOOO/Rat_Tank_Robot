@@ -47,13 +47,7 @@ class RatBrain:
         self.command_server = get_command_server()
         
         # Initialize LED controller with Freenove tank parameters
-        self.led_controller = get_led_controller(
-            # pin=LED_PIN,
-            # count=LED_COUNT,
-            # brightness=LED_BRIGHTNESS,
-            # color_format=LED_COLOR_FORMAT,
-            # pcb_version=LED_PCB_VERSION
-        )
+        self.led_controller = get_led_controller()
         
         self.motor_controller = get_motor_controller()
         
@@ -204,8 +198,8 @@ class RatBrain:
                 self._start_mission(selected)
         
         # Flash LED with selection color
-        selection_color = self._get_selected_item_color()
-        self.led_controller.flash(selection_color, interval=0.5)
+        # selection_color = self._get_selected_item_color()
+        # self.led_controller.flash(selection_color, interval=0.5)
 
     def _start_behavior(self, behavior_name: str):
         """Start a behavior."""

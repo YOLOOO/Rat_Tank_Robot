@@ -4,7 +4,6 @@ Common Hardware Layer
 Centralized hardware abstraction layer.
 All GPIO access goes through here.
 """
-from config import SERVO_PCB_VERSION, SERVO_PWM_FREQ
 from .spi_ledpixel import Freenove_SPI_LedPixel
 from .motor import tankMotor
 from .servo import HardwareServo
