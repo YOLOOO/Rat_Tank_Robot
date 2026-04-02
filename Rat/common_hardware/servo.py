@@ -51,19 +51,18 @@ class PigpioServo:
 #             self.servo3.angle = angle  # Set angle for servo 3
 
 from rpi_hardware_pwm import HardwarePWM
-from config import SERVO_PCB_VERSION, SERVO_HZ
 class HardwareServo:
-    def __init__(self, SERVO_PCB_VERSION, SERVO_HZ):
+    def __init__(self, pcb_version, servo_hz):
         # Initialize the HardwareServo instance
-        self.pcb_version = SERVO_PCB_VERSION  # PCB version
+        self.pcb_version = pcb_version  # PCB version
         self.pwm_gpio12 = None  # PWM object for GPIO 12
         self.pwm_gpio13 = None  # PWM object for GPIO 13
         if self.pcb_version == 1:
-            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 12 on chip 0
-            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 13 on chip 0
+            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=servo_hz, chip=0)  # Initialize PWM for GPIO 12 on chip 0
+            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=servo_hz, chip=0)  # Initialize PWM for GPIO 13 on chip 0
         elif self.pcb_version == 2:
-            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 12 on chip 2
-            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=SERVO_HZ, chip=0)  # Initialize PWM for GPIO 13 on chip 2
+            self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=servo_hz, chip=0)  # Initialize PWM for GPIO 12 on chip 2
+            self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=servo_hz, chip=0)  # Initialize PWM for GPIO 13 on chip 2
         self.pwm_gpio12.start(0)  # Start PWM for GPIO 12 with 0% duty cycle
         self.pwm_gpio13.start(0)  # Start PWM for GPIO 13 with 0% duty cycle
 
