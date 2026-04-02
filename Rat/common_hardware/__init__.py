@@ -7,7 +7,7 @@ All GPIO access goes through here.
 from config import SERVO_PCB_VERSION, SERVO_PWM_FREQ
 from .spi_ledpixel import Freenove_SPI_LedPixel
 from .motor import tankMotor
-from .servo import PigpioServo
+from .servo import HardwareServo
 
 
 _led_controller = None
@@ -32,7 +32,7 @@ def get_servo_controller():
     """Get or create the servo controller singleton."""
     global _servo_controller
     if _servo_controller is None:
-        _servo_controller = PigpioServo()
+        _servo_controller = HardwareServo()
     return _servo_controller
 
 __all__ = [
