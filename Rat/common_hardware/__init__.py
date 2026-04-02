@@ -5,16 +5,37 @@ Centralized hardware abstraction layer.
 All GPIO access goes through here.
 """
 
-from .leds import get_led_controller
-from .motors import get_motor_controller
-from .servos import get_servo_controller
-from .distance import get_distance_sensor
-from .tracking import get_tracking_sensor
+from .spi_ledpixel import FreenoveRPiWS281x
+from .motor import tankMotor
+from .servo import GpiozeroServo
+
+_led_controller = None
+_motor_controller = None
+_servo_controller = None
+
+def get_led_controller():
+    """Get or create the LED controller singleton."""
+    global _led_controller
+    if _led_controller is None:
+        _led_controller = FreenoveRPiWS281x()
+    return _led_controller
+
+def get_motor_controller():
+    """Get or create the motor controller singleton."""
+    global _motor_controller
+    if _motor_controller is None:
+        _motor_controller = tankMotor()
+    return _motor_controller
+
+def get_servo_controller():
+    """Get or create the servo controller singleton."""
+    global _servo_controller
+    if _servo_controller is None:
+        _servo_controller = GpiozeroServo()
+    return _servo_controller
 
 __all__ = [
     "get_led_controller",
     "get_motor_controller",
-    "get_servo_controller",
-    "get_distance_sensor",
-    "get_tracking_sensor",
+    "get_servo_controller"
 ]
