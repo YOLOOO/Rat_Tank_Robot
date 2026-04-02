@@ -1,8 +1,9 @@
 """
 Servo Controller - Unified interface for servo control
 Supports:
-  - pigpio backend for Pi 5 + PCB v2 (hardware PWM via software)
-  - gpiozero backend fallback for other configurations
+  - PigpioServo: Basic pigpio backend
+  - GpiozeroServo: gpiozero backend (fallback)
+  - HardwareServo: rpi_hardware_pwm backend (PCB v2)
 """
 
 import logging
@@ -19,43 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 class PigpioServo:
-    """Servo control using pigpio (Pi 5 + PCB v2)"""
+    """Servo control using pigpio"""
     
     def __init__(self):
         try:
             import pigpio
-            logger.info("Attempting pigpio connection...")
+            logger.info("Initializing PigpioServo backend...")
             
-            self.pi = pigpio.pi()
+            self.channel1 = SERVO_CHANNEL_0
+            self.channel2 = SERVO_CHANNEL_1
+            self.channel3 = SERVO_CHANNEL_2
+            self.PwmServo = pigpio.pi()
             
-            # Verify pigpiod daemon is running
-            if not self.pi.connected:
-                logger.error("pigpiod daemon not connected! Run: sudo pigpiod")
-                self.available = False
-                return
+            self.PwmServo.set_mode(self.channel1, pigpio.OUTPUT)
+            self.PwmServo.set_mode(self.channel2, pigpio.OUTPUT)
+            self.PwmServo.set_mode(self.channel3, pigpio.OUTPUT)
             
-            logger.info("✓ pigpiod daemon connected")
+            self.PwmServo.set_PWM_frequency(self.channel1, 50)
+            self.PwmServo.set_PWM_frequency(self.channel2, 50)
+            self.PwmServo.set_PWM_frequency(self.channel3, 50)
             
-            # Map channels to pins
-            self.channel_pins = {
-                '0': SERVO_CHANNEL_0,
-                0: SERVO_CHANNEL_0,
-                '1': SERVO_CHANNEL_1,
-                1: SERVO_CHANNEL_1,
-                '2': SERVO_CHANNEL_2,
-                2: SERVO_CHANNEL_2,
-            }
+            self.PwmServo.set_PWM_range(self.channel1, 4000)
+            self.PwmServo.set_PWM_range(self.channel2, 4000)
+            self.PwmServo.set_PWM_range(self.channel3, 4000)
             
-            # Configure each GPIO pin for PWM
-            for ch, pin in [('0', SERVO_CHANNEL_0), ('1', SERVO_CHANNEL_1), ('2', SERVO_CHANNEL_2)]:
-                self.pi.set_mode(pin, pigpio.OUTPUT)
-                self.pi.set_PWM_frequency(pin, 50)  # 50 Hz for servos
-                self.pi.set_PWM_range(pin, 4000)    # 4000 range for finer control
-                logger.info(f"  Servo {ch}: GPIO {pin} configured (50Hz, 4000 range)")
-            
-            self.available = True
             logger.info("✓ PigpioServo backend initialized")
-            
+            self.available = True
         except Exception as e:
             logger.error(f"PigpioServo init failed: {e}")
             self.available = False
@@ -65,64 +55,63 @@ class PigpioServo:
         if not self.available:
             return
         
-        pin = self.channel_pins.get(channel)
-        if pin is None:
-            logger.warning(f"Invalid channel: {channel}")
-            return
-        
-        # Calculate duty cycle for angle
-        # Formula: duty = 80 + (400/180) * angle
-        # 0°   → 80 counts   (0.5ms / 20ms = 0.025 = 80/4000)
-        # 180° → 480 counts  (2.5ms / 20ms = 0.125 = 480/4000)
-        duty = int(80 + (400.0 / 180.0) * angle)
-        
         try:
-            self.pi.set_PWM_dutycycle(pin, duty)
-            logger.debug(f"Pigpio servo ch{channel} (GPIO{pin}): {angle}° → duty {duty}/4000")
+            if channel == '0':
+                duty = int(80 + (400.0 / 180.0) * angle)
+                self.PwmServo.set_PWM_dutycycle(self.channel1, duty)
+            elif channel == '1':
+                duty = int(80 + (400.0 / 180.0) * angle)
+                self.PwmServo.set_PWM_dutycycle(self.channel2, duty)
+            elif channel == '2':
+                duty = int(80 + (400.0 / 180.0) * angle)
+                self.PwmServo.set_PWM_dutycycle(self.channel3, duty)
+            logger.debug(f"Pigpio servo ch{channel}: {angle}°")
         except Exception as e:
             logger.error(f"Failed to set servo {channel}: {e}")
 
 
 class GpiozeroServo:
-    """Servo control using gpiozero (fallback)"""
+    """Servo control using gpiozero"""
     
     def __init__(self):
         try:
             from gpiozero import AngularServo
             logger.info("Initializing GpiozeroServo backend...")
             
-            self.servos = {}
+            self.channel1 = SERVO_CHANNEL_0
+            self.channel2 = SERVO_CHANNEL_1
+            self.channel3 = SERVO_CHANNEL_2
+            self.myCorrection = 0.0
+            self.maxPW = (2.5 + self.myCorrection) / 1000
+            self.minPW = (0.5 - self.myCorrection) / 1000
             
-            self.servos[0] = AngularServo(
-                SERVO_CHANNEL_0,
-                initial_angle=90,
-                min_angle=0,
-                max_angle=180,
-                min_pulse_width=0.5 / 1000,
-                max_pulse_width=2.5 / 1000
-            )
-            
-            self.servos[1] = AngularServo(
-                SERVO_CHANNEL_1,
-                initial_angle=90,
-                min_angle=0,
-                max_angle=180,
-                min_pulse_width=0.5 / 1000,
-                max_pulse_width=2.5 / 1000
-            )
-            
-            self.servos[2] = AngularServo(
-                SERVO_CHANNEL_2,
+            self.servo1 = AngularServo(
+                self.channel1,
                 initial_angle=0,
                 min_angle=0,
                 max_angle=180,
-                min_pulse_width=0.5 / 1000,
-                max_pulse_width=2.5 / 1000
+                min_pulse_width=self.minPW,
+                max_pulse_width=self.maxPW
+            )
+            self.servo2 = AngularServo(
+                self.channel2,
+                initial_angle=0,
+                min_angle=0,
+                max_angle=180,
+                min_pulse_width=self.minPW,
+                max_pulse_width=self.maxPW
+            )
+            self.servo3 = AngularServo(
+                self.channel3,
+                initial_angle=0,
+                min_angle=0,
+                max_angle=180,
+                min_pulse_width=self.minPW,
+                max_pulse_width=self.maxPW
             )
             
             logger.info("✓ GpiozeroServo backend initialized")
             self.available = True
-            
         except Exception as e:
             logger.error(f"GpiozeroServo init failed: {e}")
             self.available = False
@@ -132,151 +121,223 @@ class GpiozeroServo:
         if not self.available:
             return
         
-        ch_num = int(channel) if isinstance(channel, str) else channel
-        if ch_num not in self.servos:
-            logger.warning(f"Invalid channel: {channel}")
-            return
-        
         try:
-            self.servos[ch_num].angle = angle
-            logger.debug(f"Gpiozero servo ch{ch_num}: {angle}°")
+            if channel == '0':
+                self.servo1.angle = angle
+            elif channel == '1':
+                self.servo2.angle = angle
+            elif channel == '2':
+                self.servo3.angle = angle
+            logger.debug(f"Gpiozero servo ch{channel}: {angle}°")
         except Exception as e:
             logger.error(f"Failed to set servo {channel}: {e}")
 
 
-class ServoController:
+class HardwareServo:
+    """Servo control using rpi_hardware_pwm (PCB v2)"""
+    
+    def __init__(self, pcb_version):
+        try:
+            from rpi_hardware_pwm import HardwarePWM
+            logger.info("Initializing HardwareServo backend...")
+            
+            self.pcb_version = pcb_version
+            self.pwm_gpio12 = None
+            self.pwm_gpio13 = None
+            
+            if self.pcb_version == 1:
+                self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=50, chip=0)
+                self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=50, chip=0)
+            elif self.pcb_version == 2:
+                self.pwm_gpio12 = HardwarePWM(pwm_channel=0, hz=50, chip=0)
+                self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=50, chip=0)
+            
+            self.pwm_gpio12.start(0)
+            self.pwm_gpio13.start(0)
+            
+            logger.info("✓ HardwareServo backend initialized")
+            self.available = True
+        except Exception as e:
+            logger.error(f"HardwareServo init failed: {e}")
+            self.available = False
+    
+    def setServoStop(self, channel):
+        """Stop the PWM for the specified channel"""
+        if not self.available:
+            return
+        
+        try:
+            if channel == '0':
+                self.pwm_gpio12.stop()
+            elif channel == '1':
+                self.pwm_gpio13.stop()
+        except Exception as e:
+            logger.error(f"Failed to stop servo {channel}: {e}")
+    
+    def setServoFrequency(self, channel, freq):
+        """Set the PWM frequency for the specified channel"""
+        if not self.available:
+            return
+        
+        try:
+            if channel == '0':
+                self.pwm_gpio12.change_frequency(freq)
+            elif channel == '1':
+                self.pwm_gpio13.change_frequency(freq)
+        except Exception as e:
+            logger.error(f"Failed to set frequency for servo {channel}: {e}")
+    
+    def setServoDuty(self, channel, duty):
+        """Set the PWM duty cycle for the specified channel"""
+        if not self.available:
+            return
+        
+        try:
+            if channel == '0':
+                self.pwm_gpio12.change_duty_cycle(duty)
+            elif channel == '1':
+                self.pwm_gpio13.change_duty_cycle(duty)
+        except Exception as e:
+            logger.error(f"Failed to set duty cycle for servo {channel}: {e}")
+    
+    def map(self, x, in_min, in_max, out_min, out_max):
+        """Map a value from one range to another"""
+        return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+    
+    def setServoPwm(self, channel, angle):
+        """Set the PWM duty cycle for the specified channel and angle"""
+        if not self.available:
+            return
+        
+        try:
+            if channel == '0':
+                duty = self.map(angle, 0, 180, 2.5, 12.5)
+                self.setServoDuty(channel, duty)
+            elif channel == '1':
+                duty = self.map(angle, 0, 180, 2.5, 12.5)
+                self.setServoDuty(channel, duty)
+            logger.debug(f"Hardware servo ch{channel}: {angle}°")
+        except Exception as e:
+            logger.error(f"Failed to set servo {channel}: {e}")
+
+
+class Servo:
     """
-    Unified servo controller matching Code/Server reference API.
-    Automatically selects backend (pigpio for PCB v2, gpiozero fallback).
+    Unified servo controller - matches Code/Server reference implementation.
+    Selects backend based on PCB version and Raspberry Pi version.
     """
     
     def __init__(self):
-        """Initialize servo controller based on PCB version and hardware availability"""
-        self.hardware_available = False
-        self.pwm = None
+        """Initialize servo controller based on PCB version"""
+        try:
+            from parameter import ParameterManager
+            self.param = ParameterManager()
+            self.pcb_version = self.param.get_pcb_version()
+            self.pi_version = self.param.get_raspberry_pi_version()
+            logger.info(f"PCB version: {self.pcb_version}, Pi version: {self.pi_version}")
+        except Exception as e:
+            logger.warning(f"Could not read parameters: {e}, using defaults")
+            self.pcb_version = SERVO_PCB_VERSION
+            self.pi_version = 2
         
-        # Try pigpio first (PCB v2 with Pi 5)
-        if SERVO_PCB_VERSION == 2:
-            logger.info("PCB v2 detected - trying pigpio backend...")
-            self.pwm = PigpioServo()
-            if self.pwm.available:
-                self.hardware_available = True
-                logger.info("✓ Using PigpioServo backend for PCB v2")
-            else:
-                logger.warning("Pigpio not available, falling back to gpiozero...")
-        
-        # Fallback to gpiozero if pigpio failed or PCB v1
-        if not self.hardware_available:
-            logger.info("Initializing gpiozero fallback...")
+        # Select backend based on PCB and Pi version
+        if self.pcb_version == 1 and self.pi_version == 1:
+            logger.info("Using GpiozeroServo (PCB v1, Pi v1)")
             self.pwm = GpiozeroServo()
-            self.hardware_available = self.pwm.available
-            if self.hardware_available:
-                logger.info("✓ Using GpiozeroServo backend")
-        
-        # Channel angle limits
-        self.angle_limits = {
-            '0': (SERVO_CH0_MIN, SERVO_CH0_MAX),
-            0: (SERVO_CH0_MIN, SERVO_CH0_MAX),
-            '1': (SERVO_CH1_MIN, SERVO_CH1_MAX),
-            1: (SERVO_CH1_MIN, SERVO_CH1_MAX),
-            '2': (SERVO_CH2_MIN, SERVO_CH2_MAX),
-            2: (SERVO_CH2_MIN, SERVO_CH2_MAX),
-        }
+        elif self.pcb_version == 1 and self.pi_version == 2:
+            logger.info("Using GpiozeroServo (PCB v1, Pi v2)")
+            self.pwm = GpiozeroServo()
+        elif self.pcb_version == 2 and self.pi_version == 1:
+            logger.info("Using HardwareServo (PCB v2, Pi v1)")
+            self.pwm = HardwareServo(1)
+            # Fallback to gpiozero if HardwareServo unavailable
+            if not self.pwm.available:
+                logger.warning("HardwareServo unavailable, falling back to GpiozeroServo")
+                self.pwm = GpiozeroServo()
+        elif self.pcb_version == 2 and self.pi_version == 2:
+            logger.info("Using HardwareServo (PCB v2, Pi v2)")
+            self.pwm = HardwareServo(2)
+            # Fallback to gpiozero if HardwareServo unavailable
+            if not self.pwm.available:
+                logger.warning("HardwareServo unavailable, falling back to GpiozeroServo")
+                self.pwm = GpiozeroServo()
+        else:
+            logger.warning(f"Unknown config (PCB{self.pcb_version}, Pi{self.pi_version}), using GpiozeroServo")
+            self.pwm = GpiozeroServo()
         
         # Set initial positions
-        if self.hardware_available:
-            try:
-                self.pwm.setServoPwm("0", 90)
-                self.pwm.setServoPwm("1", 140)
-                logger.info("Servos initialized to default positions")
-            except Exception as e:
-                logger.warning(f"Failed to set initial positions: {e}")
+        self.pwm.setServoPwm("0", 90)
+        self.pwm.setServoPwm("1", 140)
     
-    def angle_range(self, channel, angle):
-        """Clamp angle to channel-specific limits"""
-        ch_key = channel if isinstance(channel, str) else str(channel)
-        min_angle, max_angle = self.angle_limits.get(channel, (0, 180))
+    def angle_range(self, channel, init_angle):
+        """Ensure the angle is within the valid range for the specified channel"""
+        try:
+            if str(channel) == '0':
+                if init_angle < SERVO_CH0_MIN:
+                    init_angle = SERVO_CH0_MIN
+                elif init_angle > SERVO_CH0_MAX:
+                    init_angle = SERVO_CH0_MAX
+            elif str(channel) == '1':
+                if init_angle < SERVO_CH1_MIN:
+                    init_angle = SERVO_CH1_MIN
+                elif init_angle > SERVO_CH1_MAX:
+                    init_angle = SERVO_CH1_MAX
+            elif str(channel) == '2':
+                if init_angle < SERVO_CH2_MIN:
+                    init_angle = SERVO_CH2_MIN
+                elif init_angle > SERVO_CH2_MAX:
+                    init_angle = SERVO_CH2_MAX
+        except Exception as e:
+            logger.error(f"Error in angle_range: {e}")
         
-        clamped = max(min_angle, min(max_angle, angle))
-        
-        if clamped != angle:
-            logger.debug(f"Servo {ch_key}: angle {angle}° clamped to {clamped}° ({min_angle}-{max_angle})")
-        
-        return clamped
+        return init_angle
+    
     
     def setServoAngle(self, channel, angle):
-        """
-        Set servo angle (reference API).
-        Accepts channel as string ('0', '1', '2') or int (0, 1, 2).
-        """
-        ch_str = str(channel)
-        clamped = self.angle_range(channel, int(angle))
-        
-        logger.info(f"setServoAngle: ch{ch_str} → {clamped}°")
-        
-        if not self.hardware_available:
-            logger.debug(f"[SIMULATION] Servo {ch_str} would rotate to {clamped}°")
-            return
-        
-        if self.pwm:
-            self.pwm.setServoPwm(ch_str, clamped)
-    
-    def set_servo_angle(self, channel, angle):
-        """Lowercase alias for setServoAngle"""
-        self.setServoAngle(channel, angle)
-    
-    def sweep_servo(self, channel, start_angle=None, end_angle=None, step=5, delay=0.05):
-        """
-        Sweep servo from start to end angle.
-        Defaults to channel min/max if not specified.
-        """
-        ch_num = int(channel) if isinstance(channel, str) else channel
-        min_angle, max_angle = self.angle_limits.get(channel, (0, 180))
-        
-        start = start_angle if start_angle is not None else min_angle
-        end = end_angle if end_angle is not None else max_angle
-        
-        logger.info(f"Servo {ch_num} sweep: {start}° → {end}° (step={step}, delay={delay}s)")
-        
-        # Forward sweep
-        if start <= end:
-            current = start
-            while current <= end:
-                self.setServoAngle(channel, current)
-                time.sleep(delay)
-                current += step
-        else:
-            current = start
-            while current >= end:
-                self.setServoAngle(channel, current)
-                time.sleep(delay)
-                current -= step
-        
-        # Ensure exact final position
-        self.setServoAngle(channel, end)
+        """Set the angle for the specified channel"""
+        try:
+            angle = self.angle_range(str(channel), int(angle))
+            self.pwm.setServoPwm(str(channel), int(angle))
+            logger.debug(f"setServoAngle: ch{channel} → {angle}°")
+        except Exception as e:
+            logger.error(f"Failed to set servo angle: {e}")
     
     def setServoStop(self):
-        """Stop all servos (for reference compatibility)"""
-        logger.info("Stopping all servos")
-        # Servos don't need explicit stop in software control
-    
-    def cleanup(self):
-        """Cleanup resources"""
-        if self.pwm and hasattr(self.pwm, 'pi'):
+        """Stop the PWM for all servos"""
+        if self.pcb_version == 2 and hasattr(self.pwm, 'setServoStop'):
             try:
-                self.pwm.pi.stop()
-                logger.info("pigpio connection closed")
-            except:
-                pass
+                self.pwm.setServoStop('0')
+                self.pwm.setServoStop('1')
+                logger.info("Servos stopped")
+            except Exception as e:
+                logger.error(f"Failed to stop servos: {e}")
 
 
-# Singleton factory pattern
-_servo_controller = None
-
-
-def get_servo_controller() -> ServoController:
-    """Get or create the servo controller singleton."""
-    global _servo_controller
-    if _servo_controller is None:
-        _servo_controller = ServoController()
-    return _servo_controller
+# Main program logic
+if __name__ == '__main__':
+    import time
+    servo = Servo()
+    
+    print("Now servo 0 will be rotated to 150° and servo 1 will be rotated to 90°.")
+    print("If they were already at 150° and 90°, nothing would be observed.")
+    print("Please keep the program running when installing the servos.")
+    print("After that, you can press ctrl-C to end the program.")
+    
+    try:
+        while True:
+            servo.setServoAngle('0', 150)
+            servo.setServoAngle('1', 90)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        # Gradually decrease the angle of servo 0 from 150° to 90°
+        for i in range(150, 90, -1):
+            servo.setServoAngle('0', i)
+            time.sleep(0.01)
+        
+        # Gradually increase the angle of servo 1 from 90° to 140°
+        for i in range(90, 140, 1):
+            servo.setServoAngle('1', i)
+            time.sleep(0.01)
+        
+        servo.setServoStop()
+        print("\nEnd of program")
