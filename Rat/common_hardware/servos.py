@@ -313,6 +313,18 @@ class Servo:
                 logger.error(f"Failed to stop servos: {e}")
 
 
+# Singleton factory pattern
+_servo_controller = None
+
+
+def get_servo_controller():
+    """Get or create the servo controller singleton."""
+    global _servo_controller
+    if _servo_controller is None:
+        _servo_controller = Servo()
+    return _servo_controller
+
+
 # Main program logic
 if __name__ == '__main__':
     import time
