@@ -1,83 +1,78 @@
 """
-Hardware Test Behavior
-======================
-Comprehensive hardware testing behavior.
-Tests LED modes, servo motion, and motor movement through the brain interface.
+Hardware Testing Behavior
+Tests LED, Motor, and Servo through brain interface.
 """
 
-import time
 import logging
-from behavior_scripts.base_behavior import BaseBehavior
+import time
 
 logger = logging.getLogger(__name__)
 
 
-class Behavior(BaseBehavior):
-    """
-    TEST: Hardware Testing Behavior
-    ===============================
-    Comprehensive hardware testing behavior.
-    Can be selected from the menu to run hardware diagnostics.
-    Tests LED modes, servo motion, and motor movement through the brain interface.
-    """
-
-    name = "TEST"
-    color = (255, 165, 0)  # Orange
-
+class Behavior:
+    """Hardware test behavior - runs tests and returns to IDLE."""
+    
     def __init__(self):
-        """Initialize test behavior with state tracking."""
-        super().__init__()
-        self.test_phase = 0  # Current test phase
-        self.phase_step = 0  # Step within current phase
-        self.phase_start_time = time.time()
-        
-        # Test phases: 0=LED, 1=SERVO, 2=MOTOR
-        self.num_phases = 3
-        self.current_phase_name = "LED"
-        
+        """Initialize test behavior."""
+        self.phase = 0  # 0=LED, 1=SERVO, 2=MOTOR
+        self.step = 0
+        self.phase_start = time.time()
         logger.info("Test behavior initialized")
-
+    
     def run(self, brain) -> bool:
         """
-        Run one iteration of the test behavior.
+        Run one iteration of hardware tests.
         
         Args:
-            brain: RatBrain instance with access to motors, LEDs, servos
+            brain: RatBrain instance
         
         Returns:
-            True to continue testing, False to finish and return to IDLE
+            True to keep running, False to finish and return to IDLE
         """
         try:
-            if self.test_phase == 0:
-                return self._test_led(brain)
-            elif self.test_phase == 1:
-                return self._test_servo(brain)
-            elif self.test_phase == 2:
-                return self._test_motor(brain)
-            else:
-                # All tests complete
-                logger.info("All hardware tests completed!")
-                brain.led.turn_off()
-                return False
+            if self.phase == 0:
+                # LED TEST PHASE
+                if self._test_led_phase(brain):
+                    return True  # Keep running
+                else:
+                    # Move to servo phase
+                    self.phase = 1
+                    self.step = 0
+                    self.phase_start = time.time()
+                    return True
+            
+            elif self.phase == 1:
+                # SERVO TEST PHASE
+                if self._test_servo_phase(brain):
+                    return True  # Keep running
+                else:
+                    # Move to motor phase
+                    self.phase = 2
+                    self.step = 0
+                    self.phase_start = time.time()
+                    return True
+            
+            elif self.phase == 2:
+                # MOTOR TEST PHASE
+                if self._test_motor_phase(brain):
+                    return True  # Keep running
+                else:
+                    # All tests done - return to IDLE
+                    logger.info("All tests completed!")
+                    brain.led.turn_off()
+                    return False
         
-        except KeyboardInterrupt:
-            logger.info("Test interrupted by user")
-            brain.motor.stop()
-            brain.led.turn_off()
-            return False
         except Exception as e:
-            logger.error(f"Test error: {e}", exc_info=True)
+            logger.error(f"Test error: {e}")
             brain.motor.stop()
-            brain.led.set_color((255, 0, 0))  # Red = error
-            time.sleep(1)
             brain.led.turn_off()
             return False
-
-    def _test_led(self, brain) -> bool:
+    
+    def _test_led_phase(self, brain) -> bool:
         """
-        Test LED functionality with 1 second per color.
+        Test LEDs - show each color for 1 second.
+        Returns True if still testing, False when done.
         """
-        self.current_phase_name = "LED"
         colors = [
             ((255, 0, 0), "Red"),
             ((0, 255, 0), "Green"),
@@ -88,106 +83,83 @@ class Behavior(BaseBehavior):
             ((255, 0, 255), "Magenta"),
         ]
         
-        # Reset timer on first call or phase change
-        if self.phase_step == 0:
-            self.phase_start_time = time.time()
+        elapsed = time.time() - self.phase_start
+        color_idx = int(elapsed)  # Every 1 second, next color
         
-        # Individual color tests - 1 second each
-        elapsed = time.time() - self.phase_start_time
-        color_index = int(elapsed)  # Every 1 second, move to next color
-        
-        if color_index < len(colors):
-            color, name = colors[color_index]
+        if color_idx < len(colors):
+            color, name = colors[color_idx]
             brain.led.set_color(color)
-            logger.info(f"LED Test: {name} {color} (showing for 1s)")
+            logger.info(f"LED: {name}")
             return True
-        
-        # All color tests done - move to servo
         else:
-            brain.led.turn_off()
-            logger.info("LED tests completed! Moving to servo tests...")
-            self.test_phase = 1
-            self.phase_step = 0
-            self.phase_start_time = time.time()
-            return True
-
-    def _test_servo(self, brain) -> bool:
+            logger.info("LED phase complete")
+            return False
+    
+    def _test_servo_phase(self, brain) -> bool:
         """
-        Test servo motion control with visual delays.
+        Test Servos - sweep movements.
+        4 movements, each ~0.6 seconds.
         """
-        self.current_phase_name = "SERVO"
-        servo_controller = brain.servo
-        
         movements = [
-            ("Servo 0 sweep UP (90→150)", lambda: self._servo_sweep(servo_controller, '0', 90, 150)),
-            ("Servo 0 sweep DOWN (150→90)", lambda: self._servo_sweep(servo_controller, '0', 150, 90)),
-            ("Servo 1 sweep UP (90→140)", lambda: self._servo_sweep(servo_controller, '1', 90, 140)),
-            ("Servo 1 sweep DOWN (140→90)", lambda: self._servo_sweep(servo_controller, '1', 140, 90)),
+            (0, 90, 150, 1),    # Servo 0: 90°→150°
+            (0, 150, 90, -1),   # Servo 0: 150°→90°
+            (1, 90, 140, 1),    # Servo 1: 90°→140°
+            (1, 140, 90, -1),   # Servo 1: 140°→90°
         ]
         
-        if self.phase_step < len(movements):
-            move_name, move_func = movements[self.phase_step]
-            logger.info(f"Servo Test: {move_name}")
-            move_func()
-            self.phase_step += 1
-            
-            # Brief pause between movements to observe
-            time.sleep(0.5)
-            return True
+        if self.step >= len(movements):
+            logger.info("Servo phase complete")
+            return False
         
-        # Servo test complete - move to motor test
+        channel, start, end, direction = movements[self.step]
+        elapsed = time.time() - self.phase_start
+        
+        # Each sweep takes ~0.6 seconds (60 steps * 0.01s)
+        # Do one full sweep per this run() call
+        if elapsed < 0.7:  # 0.6s sweep + 0.1s margin
+            # Perform smooth sweep
+            if direction > 0:
+                for angle in range(start, end + 1):
+                    brain.servo.setServoAngle(str(channel), angle)
+                    time.sleep(0.01)
+            else:
+                for angle in range(start, end - 1, -1):
+                    brain.servo.setServoAngle(str(channel), angle)
+                    time.sleep(0.01)
+            
+            logger.info(f"Servo {channel} sweep: {start}→{end}")
+            self.step += 1
+            self.phase_start = time.time()
+            return True
         else:
-            logger.info("Servo tests completed! Moving to motor tests...")
-            self.test_phase = 2
-            self.phase_step = 0
             return True
     
-    def _servo_sweep(self, servo_controller, channel, start, end):
-        """Helper: Sweep servo from start to end angle."""
-        if start < end:
-            for angle in range(start, end + 1, 1):
-                servo_controller.setServoAngle(channel, angle)
-                time.sleep(0.01)
-        else:
-            for angle in range(start, end - 1, -1):
-                servo_controller.setServoAngle(channel, angle)
-                time.sleep(0.01)
-
-    def _test_motor(self, brain) -> bool:
+    def _test_motor_phase(self, brain) -> bool:
         """
-        Test motor movement control with visual timing.
+        Test Motors - movement sequences.
         """
-        self.current_phase_name = "MOTOR"
-        motor_controller = brain.motor
-        
         movements = [
-            ("Forward (2s)", lambda: motor_controller.setMotorModel(2000, 2000), 2.0),
-            ("Backward (2s)", lambda: motor_controller.setMotorModel(-2000, -2000), 2.0),
-            ("Spin Left (2s)", lambda: motor_controller.setMotorModel(-2000, 2000), 2.0),
-            ("Spin Right (2s)", lambda: motor_controller.setMotorModel(2000, -2000), 2.0),
-            ("Diagonal Front-Left (2s)", lambda: motor_controller.setMotorModel(1000, 2000), 2.0),
-            ("Diagonal Front-Right (2s)", lambda: motor_controller.setMotorModel(2000, 1000), 2.0),
-            ("Stop", lambda: motor_controller.setMotorModel(0, 0), 0.5),
+            ("Forward", lambda: brain.motor.setMotorModel(2000, 2000), 2.0),
+            ("Backward", lambda: brain.motor.setMotorModel(-2000, -2000), 2.0),
+            ("Spin Left", lambda: brain.motor.setMotorModel(-2000, 2000), 2.0),
+            ("Spin Right", lambda: brain.motor.setMotorModel(2000, -2000), 2.0),
+            ("Diagonal FL", lambda: brain.motor.setMotorModel(1000, 2000), 1.5),
+            ("Diagonal FR", lambda: brain.motor.setMotorModel(2000, 1000), 1.5),
+            ("Stop", lambda: brain.motor.setMotorModel(0, 0), 0.5),
         ]
         
-        if self.phase_step < len(movements):
-            move_name, move_func, duration = movements[self.phase_step]
-            logger.info(f"Motor Test: {move_name}")
-            move_func()
-            self.phase_step += 1
-            time.sleep(duration)
-            return True
-        
-        # Motor test complete - all tests done
-        else:
-            logger.info("Motor tests completed! All hardware tests finished!")
-            motor_controller.setMotorModel(0, 0)
-            brain.led.set_color((0, 255, 0))  # Green = success
-            time.sleep(1)
-            brain.led.turn_off()
-            self.test_phase = 3  # Mark as complete
+        if self.step >= len(movements):
+            logger.info("Motor phase complete")
             return False
-
-    def cleanup(self):
-        """Cleanup when test behavior ends."""
-        logger.info("Test behavior cleanup")
+        
+        name, func, duration = movements[self.step]
+        elapsed = time.time() - self.phase_start
+        
+        if elapsed < duration:
+            func()
+            logger.info(f"Motor: {name}")
+            return True
+        else:
+            self.step += 1
+            self.phase_start = time.time()
+            return True
