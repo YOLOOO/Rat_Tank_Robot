@@ -48,11 +48,11 @@ class RatBrain:
         
         # Initialize LED controller with Freenove tank parameters
         self.led_controller = get_led_controller(
-            pin=LED_PIN,
-            count=LED_COUNT,
-            brightness=LED_BRIGHTNESS,
-            color_format=LED_COLOR_FORMAT,
-            pcb_version=LED_PCB_VERSION
+            # pin=LED_PIN,
+            # count=LED_COUNT,
+            # brightness=LED_BRIGHTNESS,
+            # color_format=LED_COLOR_FORMAT,
+            # pcb_version=LED_PCB_VERSION
         )
         
         self.motor_controller = get_motor_controller()
