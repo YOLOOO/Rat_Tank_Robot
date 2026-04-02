@@ -48,7 +48,7 @@ class GpiozeroServo:
         elif channel == '2':
             self.servo3.angle = angle  # Set angle for servo 3
 
-from lib_utils import HardwarePWM
+from rpi_hardware_pwm import HardwarePWM
 class HardwareServo:
     def __init__(self, pcb_version):
         # Initialize the HardwareServo instance
