@@ -5,9 +5,9 @@ Centralized hardware abstraction layer.
 All GPIO access goes through here.
 """
 
-from .spi_ledpixel import FreenoveRPiWS281x
-from .motor import tankMotor
-from .servo import GpiozeroServo
+from spi_ledpixel import FreenoveRPiWS281x
+from motor import tankMotor
+from servo import GpiozeroServo
 
 _led_controller = None
 _motor_controller = None
