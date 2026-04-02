@@ -24,7 +24,7 @@ from config import (
     SERVO_CH2_MIN, SERVO_CH2_MAX, SERVO_PCB_VERSION
 )
 from rat_brain.control_receiver_server import get_command_server
-from common_hardware import get_led_controller, get_motor_controller, get_servo_controller
+from ..common_hardware import get_led_controller, get_motor_controller, get_servo_controller
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO)
