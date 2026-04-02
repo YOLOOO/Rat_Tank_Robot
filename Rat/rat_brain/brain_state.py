@@ -46,10 +46,10 @@ class RatBrain:
         self.state = RobotState.IDLE
         self.command_server = get_command_server()
         
-        # Initialize LED controller with Freenove tank parameters
+        # Initialize LED controller with Freenove tank parameters (Use our config instead later)
         self.led_controller = get_led_controller()
         
-        #self.motor_controller = get_motor_controller()
+        #self.motor_controller = get_motor_controller() # Broken need to fix
         
         self.servo_controller = get_servo_controller()
         
@@ -274,7 +274,7 @@ class RatBrain:
                 time.sleep(0.1)
             
             # Update LED flashing
-            self.led_controller.update()
+            #self.led_controller.update() Fix this based on the other LED
         
         except Exception as e:
             logger.error(f"Brain update error: {e}")
