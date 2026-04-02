@@ -75,9 +75,7 @@ class Behavior(BaseBehavior):
 
     def _test_led(self, brain) -> bool:
         """
-        Test LED functionality (reference flow).
-        
-        Each color shown for 1 second before moving to next.
+        Test LED functionality with 1 second per color.
         """
         self.current_phase_name = "LED"
         colors = [
@@ -90,12 +88,18 @@ class Behavior(BaseBehavior):
             ((255, 0, 255), "Magenta"),
         ]
         
+        # Reset timer on first call or phase change
+        if self.phase_step == 0:
+            self.phase_start_time = time.time()
+        
         # Individual color tests - 1 second each
-        if self.phase_step < len(colors):
-            color, name = colors[self.phase_step]
+        elapsed = time.time() - self.phase_start_time
+        color_index = int(elapsed)  # Every 1 second, move to next color
+        
+        if color_index < len(colors):
+            color, name = colors[color_index]
             brain.led.set_color(color)
-            logger.info(f"LED Test: {name} {color}")
-            self.phase_step += 1
+            logger.info(f"LED Test: {name} {color} (showing for 1s)")
             return True
         
         # All color tests done - move to servo
@@ -104,61 +108,31 @@ class Behavior(BaseBehavior):
             logger.info("LED tests completed! Moving to servo tests...")
             self.test_phase = 1
             self.phase_step = 0
+            self.phase_start_time = time.time()
             return True
 
     def _test_servo(self, brain) -> bool:
         """
-        Test servo motion control (reference API).
-        
-        Exactly matches Code/Server/test.py servo test:
-        - Smooth 1-degree steps at 0.01s intervals
-        - 4 sweep movements repeated 3 times
+        Test servo motion control with visual delays.
         """
         self.current_phase_name = "SERVO"
         servo_controller = brain.servo
         
-        # Motion 1: Servo 0 sweep 90→150 (3 cycles)
-        if self.phase_step < 3:
-            cycle = self.phase_step
-            logger.info(f"Servo Test: Servo 0 sweep (cycle {cycle + 1}/3)")
-            # Smooth sweep: 1 degree steps, 0.01s delay = 0.6s per sweep
-            for i in range(90, 150, 1):
-                servo_controller.setServoAngle('0', i)
-                time.sleep(0.01)
-            self.phase_step += 1
-            return True
+        movements = [
+            ("Servo 0 sweep UP (90→150)", lambda: self._servo_sweep(servo_controller, '0', 90, 150)),
+            ("Servo 0 sweep DOWN (150→90)", lambda: self._servo_sweep(servo_controller, '0', 150, 90)),
+            ("Servo 1 sweep UP (90→140)", lambda: self._servo_sweep(servo_controller, '1', 90, 140)),
+            ("Servo 1 sweep DOWN (140→90)", lambda: self._servo_sweep(servo_controller, '1', 140, 90)),
+        ]
         
-        # Motion 2: Servo 1 sweep 140→90 (3 cycles)
-        elif self.phase_step < 6:
-            cycle = self.phase_step - 3
-            logger.info(f"Servo Test: Servo 1 sweep down (cycle {cycle + 1}/3)")
-            # Smooth sweep: 1 degree steps, 0.01s delay
-            for i in range(140, 90, -1):
-                servo_controller.setServoAngle('1', i)
-                time.sleep(0.01)
+        if self.phase_step < len(movements):
+            move_name, move_func = movements[self.phase_step]
+            logger.info(f"Servo Test: {move_name}")
+            move_func()
             self.phase_step += 1
-            return True
-        
-        # Motion 3: Servo 1 sweep 90→140 (3 cycles)
-        elif self.phase_step < 9:
-            cycle = self.phase_step - 6
-            logger.info(f"Servo Test: Servo 1 sweep up (cycle {cycle + 1}/3)")
-            # Smooth sweep: 1 degree steps, 0.01s delay
-            for i in range(90, 140, 1):
-                servo_controller.setServoAngle('1', i)
-                time.sleep(0.01)
-            self.phase_step += 1
-            return True
-        
-        # Motion 4: Servo 0 sweep 150→90 (3 cycles)
-        elif self.phase_step < 12:
-            cycle = self.phase_step - 9
-            logger.info(f"Servo Test: Servo 0 sweep down (cycle {cycle + 1}/3)")
-            # Smooth sweep: 1 degree steps, 0.01s delay
-            for i in range(150, 90, -1):
-                servo_controller.setServoAngle('0', i)
-                time.sleep(0.01)
-            self.phase_step += 1
+            
+            # Brief pause between movements to observe
+            time.sleep(0.5)
             return True
         
         # Servo test complete - move to motor test
@@ -167,38 +141,41 @@ class Behavior(BaseBehavior):
             self.test_phase = 2
             self.phase_step = 0
             return True
+    
+    def _servo_sweep(self, servo_controller, channel, start, end):
+        """Helper: Sweep servo from start to end angle."""
+        if start < end:
+            for angle in range(start, end + 1, 1):
+                servo_controller.setServoAngle(channel, angle)
+                time.sleep(0.01)
+        else:
+            for angle in range(start, end - 1, -1):
+                servo_controller.setServoAngle(channel, angle)
+                time.sleep(0.01)
 
     def _test_motor(self, brain) -> bool:
         """
-        Test motor movement control (reference API).
-        
-        Uses duty cycles -4095 to 4095 matching Code/Server reference.
+        Test motor movement control with visual timing.
         """
         self.current_phase_name = "MOTOR"
         motor_controller = brain.motor
         
         movements = [
-            ("Forward", lambda: motor_controller.setMotorModel(2000, 2000)),
-            ("Backward", lambda: motor_controller.setMotorModel(-2000, -2000)),
-            ("Spin Left", lambda: motor_controller.setMotorModel(-2000, 2000)),
-            ("Spin Right", lambda: motor_controller.setMotorModel(2000, -2000)),
-            ("Stop", lambda: motor_controller.setMotorModel(0, 0)),
+            ("Forward (2s)", lambda: motor_controller.setMotorModel(2000, 2000), 2.0),
+            ("Backward (2s)", lambda: motor_controller.setMotorModel(-2000, -2000), 2.0),
+            ("Spin Left (2s)", lambda: motor_controller.setMotorModel(-2000, 2000), 2.0),
+            ("Spin Right (2s)", lambda: motor_controller.setMotorModel(2000, -2000), 2.0),
+            ("Diagonal Front-Left (2s)", lambda: motor_controller.setMotorModel(1000, 2000), 2.0),
+            ("Diagonal Front-Right (2s)", lambda: motor_controller.setMotorModel(2000, 1000), 2.0),
+            ("Stop", lambda: motor_controller.setMotorModel(0, 0), 0.5),
         ]
         
         if self.phase_step < len(movements):
-            move_name, move_func = movements[self.phase_step]
-            
-            if move_name == "Stop":
-                logger.info(f"Motor Test: {move_name}")
-                move_func()
-                self.phase_step += 1
-                time.sleep(0.5)
-            else:
-                logger.info(f"Motor Test: {move_name} (2s)")
-                move_func()
-                self.phase_step += 1
-                time.sleep(2)
-            
+            move_name, move_func, duration = movements[self.phase_step]
+            logger.info(f"Motor Test: {move_name}")
+            move_func()
+            self.phase_step += 1
+            time.sleep(duration)
             return True
         
         # Motor test complete - all tests done
