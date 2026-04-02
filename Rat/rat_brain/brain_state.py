@@ -49,7 +49,7 @@ class RatBrain:
         # Initialize LED controller with Freenove tank parameters
         self.led_controller = get_led_controller()
         
-        self.motor_controller = get_motor_controller()
+        #self.motor_controller = get_motor_controller()
         
         self.servo_controller = get_servo_controller()
         
@@ -71,10 +71,10 @@ class RatBrain:
         """Shorthand for LED controller."""
         return self.led_controller
     
-    @property
-    def motor(self):
-        """Shorthand for motor controller."""
-        return self.motor_controller
+    # @property
+    # def motor(self):
+    #     """Shorthand for motor controller."""
+    #     return self.motor_controller
     
     @property
     def servo(self):
@@ -250,7 +250,7 @@ class RatBrain:
     def _stop_running(self):
         """Stop current behavior and cleanup."""
         # Stop motors
-        self.motor_controller.stop()
+        #self.motor_controller.stop()
         
         # Turn off LEDs
         self.led_controller.turn_off()
@@ -306,7 +306,7 @@ class RatBrain:
         """Cleanup resources."""
         logger.info("Cleaning up...")
         self._stop_running()
-        self.motor_controller.cleanup()
+        #self.motor_controller.cleanup()
         self.led_controller.turn_off()
         self.command_server.stop()
         logger.info("RAT BRAIN STOPPED")
