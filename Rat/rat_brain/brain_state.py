@@ -199,7 +199,8 @@ class RatBrain:
         
         # Flash LED with selection color
         selection_color = self._get_selected_item_color()
-        self.led_controller.set_all_led_rgb(selection_color[1])
+        rgb = selection_color[1]
+        self.led_controller.set_all_led_rgb(rgb)
 
     def _start_behavior(self, behavior_name: str):
         """Start a behavior."""
