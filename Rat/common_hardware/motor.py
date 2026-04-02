@@ -1,12 +1,12 @@
 # Import the Motor class from the gpiozero library
 from gpiozero import Motor
-
+from config import MOTOR_LEFT_FORWARD, MOTOR_LEFT_BACKWARD, MOTOR_RIGHT_FORWARD, MOTOR_RIGHT_BACKWARD
 # Define the tankMotor class to control the motors of a tank-like robot
 class tankMotor:
     def __init__(self):
         """Initialize the tankMotor class with GPIO pins for the left and right motors."""
-        self.left_motor = Motor(24, 23)  # Initialize the left motor with GPIO pins 23 and 24
-        self.right_motor = Motor(5, 6)   # Initialize the right motor with GPIO pins 6 and 5
+        self.left_motor = Motor(MOTOR_LEFT_FORWARD, MOTOR_LEFT_BACKWARD)  # Initialize the left motor with GPIO pins 23 and 24
+        self.right_motor = Motor(MOTOR_RIGHT_FORWARD, MOTOR_RIGHT_BACKWARD)   # Initialize the right motor with GPIO pins 6 and 5
 
     def duty_range(self, duty1, duty2):
         """Ensure the duty cycle values are within the valid range (-4095 to 4095)."""
