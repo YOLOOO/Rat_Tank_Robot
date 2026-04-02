@@ -41,6 +41,14 @@ class CommandReceiverServer:
 
     def start(self):
         """Start the TCP server."""
+        if self.running:
+            logger.warning("Command server already running")
+            return
+
+        if self.server_thread and self.server_thread.is_alive():
+            logger.warning("Command server thread already alive")
+            return
+
         self.running = True
         self.server_thread = threading.Thread(target=self._run_server, daemon=True)
         self.server_thread.start()
@@ -53,23 +61,27 @@ class CommandReceiverServer:
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(1)
+            self.server_socket.settimeout(1.0)
+
             logger.info(f"Server listening on {self.host}:{self.port}")
 
             while self.running:
                 try:
-                    # Accept connection with timeout
-                    self.server_socket.settimeout(1.0)
-                    self.client_socket, addr = self.server_socket.accept()
+                    client_socket, addr = self.server_socket.accept()
+                    self.client_socket = client_socket
                     logger.info(f"Client connected from {addr}")
-                    self._handle_client(self.client_socket, addr)
+                    self._handle_client(client_socket, addr)
                 except socket.timeout:
                     continue
-                except OSError:
-                    # Socket closed
+                except OSError as e:
+                    if self.running:
+                        logger.error(f"Accept failed: {e}")
                     break
 
+        except OSError as e:
+            logger.error(f"Server bind/listen error on {self.host}:{self.port}: {e}")
         except Exception as e:
-            logger.error(f"Server error: {e}")
+            logger.exception(f"Server error: {e}")
         finally:
             self.stop()
 
@@ -149,17 +161,22 @@ class CommandReceiverServer:
     def stop(self):
         """Stop the server."""
         self.running = False
+
         if self.client_socket:
             try:
                 self.client_socket.close()
-            except:
+            except Exception:
                 pass
+            self.client_socket = None
+
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except:
+            except Exception:
                 pass
-        logger.info("Command server stopped")
+            self.server_socket = None
+
+        logger.info("Command server stopped")   
 
 
 # Singleton instance
@@ -167,8 +184,10 @@ _server = None
 
 
 def get_command_server(host: str = "0.0.0.0", port: int = 5577) -> CommandReceiverServer:
-    """Get or create the command server singleton."""
     global _server
     if _server is None:
         _server = CommandReceiverServer(host, port)
+        logger.info(f"Created command server singleton id={id(_server)}")
+    else:
+        logger.info(f"Reusing command server singleton id={id(_server)}")
     return _server
