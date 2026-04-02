@@ -27,8 +27,8 @@ BEHAVIORS = {
 # ============================================================================
 # Format: {name: (module_path, color_tuple, display_order)}
 MISSIONS = {
-    "WARS": ("missions.robot_wars", (255, 0, 0), 1),  # Red
-    "OBSTACLE": ("missions.obstacle_course", (255, 165, 0), 2),  # Orange
+    #"WARS": ("missions.robot_wars", (255, 0, 0), 1),  # Red
+    #"OBSTACLE": ("missions.obstacle_course", (255, 165, 0), 2),  # Orange
 }
 
 # ============================================================================
