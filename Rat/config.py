@@ -13,22 +13,16 @@ COMMAND_TIMEOUT = 1.0  # seconds
 MAX_COMMAND_QUEUE_SIZE = 100
 
 # ============================================================================
-# ROBOT BEHAVIOR REGISTRY
-# ============================================================================
-# Behaviors are discovered and registered here
-# Format: {name: (module_path, color_tuple, display_order)}
-BEHAVIORS = {
-    "IDLE": (None, (0, 255, 0), 0),  # Green - default idle state
-    "TEST": ("behavior_scripts.test", (255, 165, 0), 1),  # Orange - hardware testing
-}
-
-# ============================================================================
 # MISSION REGISTRY
 # ============================================================================
+# Selectable missions shown in the IDLE menu.
+# Behaviors (behavior_scripts/) are building blocks used by missions — not registered here.
 # Format: {name: (module_path, color_tuple, display_order)}
 MISSIONS = {
-    #"WARS": ("missions.robot_wars", (255, 0, 0), 1),  # Red
-    #"OBSTACLE": ("missions.obstacle_course", (255, 165, 0), 2),  # Orange
+    "TEST":           ("missions.test",           (255, 165, 0), 1),  # Orange - hardware test
+    "REMOTE_CONTROL": ("missions.remote_control", (0, 100, 255), 2),  # Blue   - trackball control
+    #"WARS":     ("missions.robot_wars",      (255, 0, 0),   3),  # Red
+    #"OBSTACLE": ("missions.obstacle_course", (255, 165, 0), 4),  # Orange
 }
 
 # ============================================================================
@@ -53,18 +47,24 @@ LED_COLORS = {
 # ============================================================================
 # MOTOR CONFIGURATION
 # ============================================================================
-# Pin assignments for motor control (gpiozero.Motor uses forward/backward pin pairs)
-# Reference: Code/Server/motor.py
-MOTOR_LEFT_FORWARD = 24
-MOTOR_LEFT_BACKWARD = 23
-MOTOR_RIGHT_FORWARD = 5
-MOTOR_RIGHT_BACKWARD = 6
+# Pin assignments — Freenove FNK0077 V2.0
+# M1 (left track) : GPIO23 (+), GPIO24 (-)
+# M2 (right track) : GPIO6  (+), GPIO5  (-)
+MOTOR_LEFT_PLUS  = 23
+MOTOR_LEFT_MINUS = 24
+MOTOR_RIGHT_PLUS = 6
+MOTOR_RIGHT_MINUS = 5
 MOTOR_PWM_FREQ = 1000  # Hz
 
-# Default motor speeds
-MOTOR_SPEED_NORMAL = 100  # 0-255
-MOTOR_SPEED_SLOW = 50
-MOTOR_SPEED_FAST = 200
+# Duty range: -4095 (full reverse) to +4095 (full forward)
+MOTOR_MAX_DUTY = 4095
+MOTOR_SPEED_NORMAL = 2048
+MOTOR_SPEED_SLOW   = 1024
+MOTOR_SPEED_FAST   = 3500
+
+# Turn calibration — degrees the robot rotates per second at MOTOR_SPEED_NORMAL
+# Tune this on your actual surface
+MOTOR_DEGREES_PER_SECOND = 180.0
 
 # ============================================================================
 # SERVO CONFIGURATION
@@ -112,7 +112,21 @@ COMMAND_POLL_INTERVAL = 0.01  # 10ms - check for new commands
 MOTOR_SAFETY_TIMEOUT = 10.0  # seconds - max time a behavior can run
 
 # ============================================================================
-# SELECTION MENU ORDER
+# MNT TRACKBALL CONTROLLER  (dev PC side)
 # ============================================================================
-# Order items appear in the selection menu (IDLE state)
-MENU_ITEMS = list(BEHAVIORS.keys()) + list(MISSIONS.keys())
+# evdev device name to match — run `python -m evdev.evtest` to find yours
+MNT_DEVICE_NAME     = "MNT Reform Trackball"
+
+# How many MOTOR commands to send per second (avoids flooding the TCP connection)
+MNT_SEND_RATE       = 30   # Hz
+
+# Ignore ball movement below this raw delta (reduces jitter when ball is still)
+MNT_DEADZONE        = 2
+
+# Multiplier applied to raw ball delta before mapping to motor duty
+# Higher = more responsive, lower = easier fine control
+MNT_SPEED_SCALE     = 40.0
+
+# Maximum motor duty the trackball can command (keeps a speed ceiling)
+MNT_MAX_DUTY        = 3500
+

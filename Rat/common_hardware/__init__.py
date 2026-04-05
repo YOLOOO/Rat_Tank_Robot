@@ -3,15 +3,19 @@ Common Hardware Layer
 ====================
 Centralized hardware abstraction layer.
 All GPIO access goes through here.
+
+Motor is a module with top-level functions (set_motors, forward, backward, etc.)
+— import it directly: `import common_hardware.motor as motor`
+
+LED and Servo are class-based and exposed as singletons here.
 """
 from .spi_ledpixel import Freenove_SPI_LedPixel
-from .motor import tankMotor
 from .servo import HardwareServo
 
 
 _led_controller = None
-_motor_controller = None
 _servo_controller = None
+
 
 def get_led_controller():
     """Get or create the LED controller singleton."""
@@ -20,12 +24,6 @@ def get_led_controller():
         _led_controller = Freenove_SPI_LedPixel()
     return _led_controller
 
-def get_motor_controller():
-    """Get or create the motor controller singleton."""
-    global _motor_controller
-    if _motor_controller is None:
-        _motor_controller = tankMotor()
-    return _motor_controller
 
 def get_servo_controller():
     """Get or create the servo controller singleton."""
@@ -34,8 +32,8 @@ def get_servo_controller():
         _servo_controller = HardwareServo()
     return _servo_controller
 
+
 __all__ = [
     "get_led_controller",
-    "get_motor_controller",
-    "get_servo_controller"
+    "get_servo_controller",
 ]
