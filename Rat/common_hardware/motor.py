@@ -19,11 +19,21 @@ from gpiozero import PWMOutputDevice
 import atexit
 import config
 
-# --- Device handles ---
-_m1p = PWMOutputDevice(config.MOTOR_LEFT_PLUS,   frequency=config.MOTOR_PWM_FREQ)
-_m1m = PWMOutputDevice(config.MOTOR_LEFT_MINUS,  frequency=config.MOTOR_PWM_FREQ)
-_m2p = PWMOutputDevice(config.MOTOR_RIGHT_PLUS,  frequency=config.MOTOR_PWM_FREQ)
-_m2m = PWMOutputDevice(config.MOTOR_RIGHT_MINUS, frequency=config.MOTOR_PWM_FREQ)
+# --- Device handles (lazy — claimed on first use) ---
+_m1p = None
+_m1m = None
+_m2p = None
+_m2m = None
+
+
+def _init():
+    global _m1p, _m1m, _m2p, _m2m
+    if _m1p is not None:
+        return
+    _m1p = PWMOutputDevice(config.MOTOR_LEFT_PLUS,   frequency=config.MOTOR_PWM_FREQ)
+    _m1m = PWMOutputDevice(config.MOTOR_LEFT_MINUS,  frequency=config.MOTOR_PWM_FREQ)
+    _m2p = PWMOutputDevice(config.MOTOR_RIGHT_PLUS,  frequency=config.MOTOR_PWM_FREQ)
+    _m2m = PWMOutputDevice(config.MOTOR_RIGHT_MINUS, frequency=config.MOTOR_PWM_FREQ)
 
 
 def _scale(value: int) -> float:
@@ -51,6 +61,7 @@ def set_motors(left: int, right: int):
     Drive both tracks independently.
     left, right : -4095 (full reverse) to +4095 (full forward)
     """
+    _init()
     _set_motor(_m1p, _m1m, left)
     _set_motor(_m2p, _m2m, right)
 
@@ -81,6 +92,8 @@ def stop():
 
 
 def cleanup():
+    if _m1p is None:
+        return
     stop()
     _m1p.close()
     _m1m.close()
