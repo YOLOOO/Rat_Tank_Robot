@@ -24,9 +24,14 @@ Controls (MNT trackball, active during remote_control mission):
 import socket
 import sys
 import logging
-import tty
-import termios
+import platform
 from typing import Optional
+
+if platform.system() == "Windows":
+    import msvcrt
+else:
+    import tty
+    import termios
 
 from mnt_backend import MntMouseBackend
 
@@ -59,13 +64,16 @@ class KeyboardBackend:
     }
 
     def read_command(self) -> Optional[str]:
-        fd  = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            key = sys.stdin.read(1).lower()
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        if platform.system() == "Windows":
+            key = msvcrt.getwch().lower()
+        else:
+            fd  = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                key = sys.stdin.read(1).lower()
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
         return self.KEY_MAP.get(key, None)
 
     def cleanup(self):

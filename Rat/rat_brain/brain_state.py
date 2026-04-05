@@ -17,6 +17,7 @@ from enum import Enum
 import config
 from rat_brain.control_receiver_server import get_command_server
 import common_hardware.motor as motor
+from common_hardware import get_led_controller
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG if config.DEBUG else logging.INFO)
@@ -45,6 +46,17 @@ class RatBrain:
         self._load_missions()
 
         logger.info("RatBrain initialized")
+
+    # ------------------------------------------------------------------
+    # LED helper
+    # ------------------------------------------------------------------
+
+    def _set_led(self, color: tuple):
+        try:
+            r, g, b = color
+            get_led_controller().set_all_led_rgb([r, g, b])
+        except Exception as e:
+            logger.warning(f"LED error: {e}")
 
     # ------------------------------------------------------------------
     # Mission loading
@@ -89,6 +101,12 @@ class RatBrain:
         print("=" * 50)
         print("  LEFT / RIGHT = scroll    SELECT = run    HALT = stop")
         print("=" * 50 + "\n")
+
+        selected = self._selected_name()
+        if selected and selected in self.missions:
+            self._set_led(self.missions[selected]["color"])
+        else:
+            self._set_led(config.LED_COLORS["idle"])
 
     # ------------------------------------------------------------------
     # HALT — checked directly from server flag, never queued
@@ -177,12 +195,14 @@ class RatBrain:
         self.running_mission    = module
         self.mission_start_time = time.time()
         self.state              = RobotState.RUNNING_MISSION
+        self._set_led(mission_data["color"])
         logger.info(f"Started mission: {name}")
 
     def _stop_mission(self):
         motor.stop()
         self.running_mission    = None
         self.mission_start_time = None
+        self._set_led(config.LED_COLORS["idle"])
         logger.info("Mission stopped")
 
     # ------------------------------------------------------------------
@@ -198,6 +218,7 @@ class RatBrain:
                 self._update_running_mission()
 
             elif self.state == RobotState.ERROR:
+                self._set_led(config.LED_COLORS["error"])
                 time.sleep(0.3)
 
         except Exception as e:

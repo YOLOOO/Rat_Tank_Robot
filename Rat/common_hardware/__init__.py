@@ -8,10 +8,8 @@ Motor is a module with top-level functions (set_motors, forward, backward, etc.)
 — import it directly: `import common_hardware.motor as motor`
 
 LED and Servo are class-based and exposed as singletons here.
+Imports are lazy so a missing driver never blocks the brain from starting.
 """
-from .spi_ledpixel import Freenove_SPI_LedPixel
-from .servo import HardwareServo
-
 
 _led_controller = None
 _servo_controller = None
@@ -21,6 +19,7 @@ def get_led_controller():
     """Get or create the LED controller singleton."""
     global _led_controller
     if _led_controller is None:
+        from .spi_ledpixel import Freenove_SPI_LedPixel
         _led_controller = Freenove_SPI_LedPixel()
     return _led_controller
 
@@ -29,6 +28,7 @@ def get_servo_controller():
     """Get or create the servo controller singleton."""
     global _servo_controller
     if _servo_controller is None:
+        from .servo import HardwareServo
         _servo_controller = HardwareServo()
     return _servo_controller
 
