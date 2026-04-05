@@ -3,26 +3,27 @@ tools/servo_calibrate.py
 
 Interactive servo calibration — find safe angle limits for each channel.
 
-Run directly on the Pi:
+Run from the Rat/ directory:
     python3 tools/servo_calibrate.py --channel 0
 
 Controls:
-    UP / k     +1°
-    DOWN / j   -1°
-    SHIFT+UP   +10°
-    SHIFT+DOWN -10°
-    m          mark current angle as MIN
-    x          mark current angle as MAX
-    p          print current marks (copy into config.py)
-    q          quit
+    k / UP arrow     +1°
+    j / DOWN arrow   -1°
+    K (shift+k)      +10°
+    J (shift+j)      -10°
+    m                mark current angle as MIN
+    x                mark current angle as MAX
+    p                print current marks (copy into config.py)
+    q                quit
 """
 
 import sys
 import argparse
 import tty
 import termios
+import os
 
-sys.path.insert(0, ".")   # run from Rat/ directory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common_hardware.servo import HardwareServo
 
@@ -32,12 +33,23 @@ ANGLE_MIN  = 0
 ANGLE_MAX  = 180
 
 
-def getch():
+def read_key():
+    """Read one keypress (handles multi-byte arrow sequences)."""
     fd  = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.buffer.read(1)
+        ch = os.read(fd, 1)
+        if ch == b'\x1b':
+            # Peek for escape sequence (arrow keys)
+            try:
+                ch2 = os.read(fd, 1)
+                if ch2 == b'[':
+                    ch3 = os.read(fd, 1)
+                    return b'\x1b[' + ch3
+            except Exception:
+                pass
+            return b'\x1b'
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
     return ch
@@ -48,57 +60,53 @@ def main():
     parser.add_argument("--channel", type=int, default=0,
                         help="Servo channel to calibrate (0, 1, 2)")
     parser.add_argument("--start", type=int, default=90,
-                        help="Starting angle (default 90)")
+                        help="Starting angle (default: 90)")
     args = parser.parse_args()
 
-    ch      = str(args.channel)
-    angle   = args.start
+    ch_str     = str(args.channel)
+    angle      = args.start
     marked_min = None
     marked_max = None
 
     servo = HardwareServo()
-    servo.setServoPwm(ch, angle)
+    servo.setServoPwm(ch_str, angle)
 
-    print(f"\nServo calibration — channel {ch}")
+    print(f"\nServo calibration — channel {args.channel}")
     print("=" * 40)
-    print("  UP/k     +1°     SHIFT+UP   +10°")
-    print("  DOWN/j   -1°     SHIFT+DOWN -10°")
+    print("  k / UP      +1°      K   +10°")
+    print("  j / DOWN    -1°      J   -10°")
     print("  m = mark MIN    x = mark MAX")
-    print("  p = print marks   q = quit")
+    print("  p = print marks     q = quit")
     print("=" * 40)
-    print(f"  Current angle: {angle}°\n")
+    print(f"  Angle: {angle}°\n")
 
     def move(delta):
         nonlocal angle
         angle = max(ANGLE_MIN, min(ANGLE_MAX, angle + delta))
-        servo.setServoPwm(ch, angle)
-        print(f"  Angle: {angle}°", end="\r")
+        servo.setServoPwm(ch_str, angle)
+        print(f"  Angle: {angle}°    ", end="\r")
 
     try:
         while True:
-            ch_in = getch()
+            key = read_key()
 
-            if ch_in == b'q':
+            if key == b'q':
                 break
-            elif ch_in == b'k' or ch_in == b'\x1b':
-                # arrow keys send ESC [ A/B
-                if ch_in == b'\x1b':
-                    seq = sys.stdin.buffer.read(2) if sys.stdin.buffer.read(1) == b'[' else b''
-                    if seq == b'A':       move(+STEP_SMALL)   # UP
-                    elif seq == b'B':     move(-STEP_SMALL)   # DOWN
-                    elif seq == b'1;2A':  move(+STEP_BIG)     # SHIFT+UP
-                    elif seq == b'1;2B':  move(-STEP_BIG)     # SHIFT+DOWN
-                else:
-                    move(+STEP_SMALL)
-            elif ch_in == b'j':
+            elif key in (b'k', b'\x1b[A'):   # k or UP arrow
+                move(+STEP_SMALL)
+            elif key in (b'j', b'\x1b[B'):   # j or DOWN arrow
                 move(-STEP_SMALL)
-            elif ch_in == b'm':
+            elif key == b'K':
+                move(+STEP_BIG)
+            elif key == b'J':
+                move(-STEP_BIG)
+            elif key == b'm':
                 marked_min = angle
                 print(f"\n  [MIN marked] = {angle}°")
-            elif ch_in == b'x':
+            elif key == b'x':
                 marked_max = angle
                 print(f"\n  [MAX marked] = {angle}°")
-            elif ch_in == b'p':
+            elif key == b'p':
                 print(f"\n  --- Copy into config.py ---")
                 print(f"  SERVO_CH{args.channel}_MIN = {marked_min if marked_min is not None else '?'}")
                 print(f"  SERVO_CH{args.channel}_MAX = {marked_max if marked_max is not None else '?'}")

@@ -68,33 +68,45 @@ def _run_led_phase() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Servo phase — sweep ch0 and ch1 back and forth
+# Servo phase — sweep ch0 and ch1 back and forth using config limits
 # ---------------------------------------------------------------------------
-_SERVO_MOVES = [
-    (0, 90,  150, 1),    # ch0: 90° → 150°
-    (0, 150, 90, -1),    # ch0: 150° → 90°
-    (1, 90,  140, 1),    # ch1: 90° → 140°
-    (1, 140, 90, -1),    # ch1: 140° → 90°
-]
+# Seconds per degree — increase to slow down, decrease to speed up
+_SERVO_STEP_DELAY = 0.03  # 30ms per degree → ~60° sweep takes ~1.8s
+
+def _servo_moves():
+    """Build move list from config limits so calibrated values are always used."""
+    ch0_min = config.SERVO_CH0_MIN
+    ch0_max = config.SERVO_CH0_MAX
+    ch1_min = config.SERVO_CH1_MIN
+    ch1_max = config.SERVO_CH1_MAX
+    return [
+        (0, ch0_min, ch0_max,  1),   # ch0: min → max
+        (0, ch0_max, ch0_min, -1),   # ch0: max → min
+        (1, ch1_min, ch1_max,  1),   # ch1: min → max
+        (1, ch1_max, ch1_min, -1),   # ch1: max → min
+    ]
 
 
 def _run_servo_phase() -> bool:
     global _step, _phase_start
 
-    servo = get_servo_controller()
+    servo  = get_servo_controller()
+    moves  = _servo_moves()
 
-    if _step >= len(_SERVO_MOVES):
+    if _step >= len(moves):
         logger.info("Servo phase complete")
         return False
 
-    channel, start, end, direction = _SERVO_MOVES[_step]
+    channel, start, end, direction = moves[_step]
+    sweep_duration = abs(end - start) * _SERVO_STEP_DELAY + 0.2  # +margin
+
     elapsed = time.time() - _phase_start
 
-    if elapsed < 0.7:
+    if elapsed < sweep_duration:
         step_range = range(start, end + 1) if direction > 0 else range(start, end - 1, -1)
         for angle in step_range:
             servo.setServoPwm(str(channel), angle)
-            time.sleep(0.01)
+            time.sleep(_SERVO_STEP_DELAY)
         logger.debug(f"Servo {channel}: {start}°→{end}°")
         _step       += 1
         _phase_start = time.time()
