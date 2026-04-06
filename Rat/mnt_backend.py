@@ -1,22 +1,20 @@
 """
 MNT Reform Optical Trackball Backend (dev PC)
 =============================================
-Reads the MNT trackball via evdev and produces robot commands.
-
-Only used inside the remote_control mission flow — NOT for menu navigation.
+Reads the MNT trackball via evdev and fires commands via callback.
 
 Ball → differential motor control:
     Y axis  → base speed (forward / backward)
-    X axis  → turn offset (added/subtracted across tracks)
+    X axis  → turn offset (differential steering)
     left  = clamp(base - offset)
     right = clamp(base + offset)
 
 Buttons:
-    BTN_LEFT   (primary)  → ARM toggle
-    BTN_RIGHT  (secondary)→ GRIP toggle
-    BTN_MIDDLE (middle)   → HALT
-    BTN_SIDE              → spare
-    BTN_EXTRA             → spare
+    BTN_LEFT   (primary)   → ARM_TOGGLE
+    BTN_RIGHT  (secondary) → GRIP_TOGGLE
+    BTN_MIDDLE (middle)    → HALT
+    BTN_SIDE               → spare
+    BTN_EXTRA              → spare
 
 Install dependency on dev PC:
     pip install evdev
@@ -25,7 +23,7 @@ Install dependency on dev PC:
 import threading
 import time
 import logging
-from typing import Optional
+from typing import Optional, Callable
 
 import config
 
@@ -37,11 +35,14 @@ try:
     _EVDEV_AVAILABLE = True
 except ImportError:
     _EVDEV_AVAILABLE = False
-    logger.error("evdev not installed — pip install evdev")
+    import platform as _platform
+    if _platform.system() == "Windows":
+        logger.info("MNT trackball not supported on Windows — keyboard only")
+    else:
+        logger.warning("evdev not installed — pip install evdev")
 
 
 def _find_device() -> Optional["evdev.InputDevice"]:
-    """Find the MNT trackball by matching device name."""
     if not _EVDEV_AVAILABLE:
         return None
     for path in evdev.list_devices():
@@ -50,11 +51,8 @@ def _find_device() -> Optional["evdev.InputDevice"]:
             logger.info(f"Found MNT trackball: {dev.name} at {path}")
             return dev
         dev.close()
-    logger.error(
-        f"MNT trackball not found. "
-        f"Looking for: '{config.MNT_DEVICE_NAME}'. "
-        f"Available devices: {[evdev.InputDevice(p).name for p in evdev.list_devices()]}"
-    )
+    available = [evdev.InputDevice(p).name for p in evdev.list_devices()]
+    logger.warning(f"MNT trackball not found. Looking for: '{config.MNT_DEVICE_NAME}'. Available: {available}")
     return None
 
 
@@ -65,27 +63,26 @@ def _clamp(value: int, limit: int) -> int:
 class MntMouseBackend:
     """
     Reads MNT trackball in a background thread.
-    Call get_command() from the sender loop to drain queued commands.
+    Fires commands via on_command callback — same interface as KeyboardBackend.
     """
 
-    def __init__(self):
-        self._device    = None
-        self._thread    = None
-        self._running   = False
+    def __init__(self, on_command: Callable[[str], None]):
+        self._on_command    = on_command
+        self._device        = None
+        self._thread        = None
+        self._running       = False
 
         # Accumulated axis deltas between send ticks
-        self._dx        = 0
-        self._dy        = 0
-        self._lock      = threading.Lock()
+        self._dx            = 0
+        self._dy            = 0
+        self._axis_lock     = threading.Lock()
 
-        # Command queue (small — only needs to buffer between read and send)
-        self._commands  = []
-
-        # Rate limiting
+        # Motor send rate limiting
         self._send_interval = 1.0 / config.MNT_SEND_RATE
         self._last_send     = 0.0
 
     def start(self) -> bool:
+        """Start the backend. Returns True if trackball was found."""
         if not _EVDEV_AVAILABLE:
             return False
         self._device = _find_device()
@@ -94,6 +91,9 @@ class MntMouseBackend:
         self._running = True
         self._thread  = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
+        # Motor tick runs on its own timer thread
+        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
+        self._motor_thread.start()
         logger.info("MNT backend started")
         return True
 
@@ -106,7 +106,7 @@ class MntMouseBackend:
                 pass
 
     # ------------------------------------------------------------------
-    # Background read loop
+    # Background read loop — buttons fire immediately
     # ------------------------------------------------------------------
 
     def _read_loop(self):
@@ -116,7 +116,7 @@ class MntMouseBackend:
                     break
 
                 if event.type == ecodes.EV_REL:
-                    with self._lock:
+                    with self._axis_lock:
                         if event.code == ecodes.REL_X:
                             self._dx += event.value
                         elif event.code == ecodes.REL_Y:
@@ -125,8 +125,7 @@ class MntMouseBackend:
                 elif event.type == ecodes.EV_KEY and event.value == 1:  # key down only
                     cmd = self._map_button(event.code)
                     if cmd:
-                        with self._lock:
-                            self._commands.append(cmd)
+                        self._on_command(cmd)
 
         except Exception as e:
             if self._running:
@@ -139,49 +138,32 @@ class MntMouseBackend:
             return "GRIP_TOGGLE"
         elif code == ecodes.BTN_MIDDLE:
             return "HALT"
-        # BTN_SIDE, BTN_EXTRA — spare, ignore for now
-        return None
+        return None  # BTN_SIDE, BTN_EXTRA spare
 
     # ------------------------------------------------------------------
-    # Called by sender loop to get next command
+    # Motor loop — rate limited, converts accumulated deltas to MOTOR cmd
     # ------------------------------------------------------------------
 
-    def get_command(self) -> Optional[str]:
-        """
-        Returns the next pending command, or a MOTOR command if enough
-        time has passed and the ball has moved.
-        Returns None if nothing to send yet.
-        """
-        with self._lock:
-            # Button commands always go first
-            if self._commands:
-                return self._commands.pop(0)
+    def _motor_loop(self):
+        while self._running:
+            time.sleep(self._send_interval)
 
-            # Rate-limit motor commands
-            now = time.monotonic()
-            if now - self._last_send < self._send_interval:
-                return None
+            with self._axis_lock:
+                dx, dy = self._dx, self._dy
+                self._dx = 0
+                self._dy = 0
 
-            self._last_send = now
-            dx, dy = self._dx, self._dy
-            self._dx = 0
-            self._dy = 0
+            # Apply deadzone
+            if abs(dx) < config.MNT_DEADZONE:
+                dx = 0
+            if abs(dy) < config.MNT_DEADZONE:
+                dy = 0
 
-        # Apply deadzone
-        if abs(dx) < config.MNT_DEADZONE:
-            dx = 0
-        if abs(dy) < config.MNT_DEADZONE:
-            dy = 0
+            # Y inverted — push forward (negative Y) = forward motion
+            base   = int(-dy * config.MNT_SPEED_SCALE)
+            offset = int( dx * config.MNT_SPEED_SCALE)
 
-        if dx == 0 and dy == 0:
-            # Send a stop to keep motors from running if ball goes idle
-            return "MOTOR:0:0"
+            left  = _clamp(base - offset, config.MNT_MAX_DUTY)
+            right = _clamp(base + offset, config.MNT_MAX_DUTY)
 
-        # Y is inverted — push ball forward (negative Y) = forward motion
-        base   = int(-dy * config.MNT_SPEED_SCALE)
-        offset = int( dx * config.MNT_SPEED_SCALE)
-
-        left  = _clamp(base - offset, config.MNT_MAX_DUTY)
-        right = _clamp(base + offset, config.MNT_MAX_DUTY)
-
-        return f"MOTOR:{left}:{right}"
+            self._on_command(f"MOTOR:{left}:{right}")
