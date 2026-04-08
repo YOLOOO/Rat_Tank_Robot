@@ -101,13 +101,11 @@ class HardwareServo:
             duty = self.map(angle, 0, 180, 2.5, 12.5)  # Map angle to duty cycle
             self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 13
 
-from lib_utils.parameter import ParameterManager
+from config import SERVO_PCB_VERSION, PI_VERSION
 class Servo:
     def __init__(self):
-        # Initialize the Servo instance
-        self.param = ParameterManager()  # Initialize parameter manager
-        self.pcb_version = self.param.get_pcb_version()  # Get PCB version
-        self.pi_version = self.param.get_raspberry_pi_version()  # Get Raspberry Pi version
+        self.pcb_version = SERVO_PCB_VERSION
+        self.pi_version = PI_VERSION
 
         if self.pcb_version == 1 and self.pi_version == 1:
             self.pwm = GpiozeroServo()  # Use GpiozeroServo for PCB version 1 and Raspberry Pi version 1

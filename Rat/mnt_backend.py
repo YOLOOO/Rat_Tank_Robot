@@ -170,7 +170,7 @@ class MntMouseBackend:
                 continue
 
             # Y inverted — push forward (negative Y) = forward motion
-            base   = int(-dy * config.MNT_SPEED_SCALE)
+            base   = int( dy * config.MNT_SPEED_SCALE)
             offset = int( dx * config.MNT_SPEED_SCALE)
 
             left  = _clamp(base - offset, config.MNT_MAX_DUTY)

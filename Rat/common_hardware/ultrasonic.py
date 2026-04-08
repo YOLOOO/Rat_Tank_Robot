@@ -1,5 +1,9 @@
 import time
-from parameter import ParameterManager
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from config import PI_VERSION
 
 class gpiozero_ultrasonic:
     def __init__(self, trigger_pin=27, echo_pin=22):
@@ -94,11 +98,9 @@ class Ultrasonic:
     def __init__(self, trigger_pin=27, echo_pin=22):
         self.trigger_pin = trigger_pin
         self.echo_pin = echo_pin
-        self.param_manager = ParameterManager()
-        self.pi_version = self.param_manager.get_pi_version()
         self.sensor = None  # Initialize as None for proper cleanup
-        
-        if self.pi_version == 2:  # Raspberry Pi 5
+
+        if PI_VERSION == 2:  # Raspberry Pi 5
             print("Using lgpiod_ultrasonic")
             self.sensor = lgpiod_ultrasonic(trigger_pin, echo_pin)
         else:  # Raspberry Pi 4 or earlier

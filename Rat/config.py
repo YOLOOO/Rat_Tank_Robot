@@ -96,6 +96,15 @@ SERVO_PCB_VERSION = 2
 DISTANCE_SENSOR_PIN = 17  # GPIO pin for distance sensor
 TRACKING_SENSOR_PIN = 27  # GPIO pin for tracking sensor
 
+# Infrared line sensors — GPIO pins vary by PCB version
+INFRARED_PCB_VERSION = 2  # 1 = older Pi, 2 = Pi 5 (Freenove FNK0077 V2.0)
+
+# Raspberry Pi hardware generation — used to select driver backends
+# 1 = Pi 4 or earlier (gpiozero), 2 = Pi 5 (lgpio/hardware PWM)
+# To detect at runtime: subprocess.run(['cat', '/sys/firmware/devicetree/base/model'])
+#   "Raspberry Pi 5" in output → 2, else → 1
+PI_VERSION = 2
+
 # ============================================================================
 # SYSTEM CONFIGURATION
 # ============================================================================
@@ -124,7 +133,7 @@ MNT_DEADZONE        = 2
 
 # Multiplier applied to raw ball delta before mapping to motor duty
 # Higher = more responsive, lower = easier fine control
-MNT_SPEED_SCALE     = 40.0
+MNT_SPEED_SCALE     = 55.0
 
 # Maximum motor duty the trackball can command (keeps a speed ceiling)
 MNT_MAX_DUTY        = 3500
