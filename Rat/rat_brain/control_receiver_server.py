@@ -21,8 +21,7 @@ logger = logging.getLogger(__name__)
 VALID_COMMANDS = {
     "LEFT", "RIGHT", "SELECT", "HALT",
     # remote_control mission commands
-    "ARM:UP", "ARM:DOWN",
-    "GRIP:OPEN", "GRIP:CLOSE",
+    "ARM_TOGGLE", "GRIP_TOGGLE",
     # MOTOR:left:right is validated separately due to dynamic values
 }
 
