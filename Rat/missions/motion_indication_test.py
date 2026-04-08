@@ -1,5 +1,5 @@
 """
-missions/test.py
+missions/motion_indication_test.py
 
 Hardware test mission — cycles through LED, Servo, and Motor checks.
 Called each brain tick via run(brain). Returns False when all phases complete.

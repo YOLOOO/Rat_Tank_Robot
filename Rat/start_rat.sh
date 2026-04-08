@@ -2,50 +2,46 @@
 #
 # START RAT BRAIN
 # ===============
-# Starts the robot brain server on Raspberry Pi
+# Starts the robot brain server on Raspberry Pi.
+# Runs detached — terminal is free immediately after launch.
+# Output is logged to rat_brain.log in this directory.
 #
-# IMPORTANT for Pi 5 + PCB v2:
-# The pigpiod daemon must be running for servo control!
-# This script will attempt to start it if needed.
+# Usage:
+#   ./start_rat.sh          — start the brain
+#   tail -f rat_brain.log   — watch live output
+#   ./stop_rat.sh           — stop the brain cleanly
 #
-
-set -e
 
 echo "=========================================="
 echo "RAT BRAIN - Starting Robot"
 echo "=========================================="
 
-# Get script directory
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
-# Optional: Set up Python path
 export PYTHONPATH="${PYTHONPATH}:$DIR"
 
-# For Pi 5 + PCB v2: Start pigpiod daemon if not running
-echo "Checking pigpiod daemon (required for servo control)..."
+# Check pigpiod daemon (required for servo control on Pi 5 + PCB v2)
+echo "Checking pigpiod daemon..."
 if ! pgrep -x "pigpiod" > /dev/null; then
     echo "Starting pigpiod daemon..."
     sudo pigpiod -l -s 1 >/dev/null 2>&1 &
     sleep 2
-    echo "✓ pigpiod daemon started"
+    echo "pigpiod started"
 else
-    echo "✓ pigpiod daemon already running"
+    echo "pigpiod already running"
 fi
 echo ""
 
-# Start the brain in background
-echo "Starting RAT BRAIN server..."
-python3 rat_brain/brain_state.py &
+# Start brain detached, log to file
+echo "Starting RAT BRAIN..."
+nohup python3 rat_brain/brain_state.py > rat_brain.log 2>&1 &
 BRAIN_PID=$!
 
 echo "Brain PID: $BRAIN_PID"
 echo ""
-echo "RAT BRAIN is running!"
-echo "Connect controller with: python3 controller_sender_client.py --host <ROBOT_IP>"
+echo "RAT BRAIN is running."
 echo ""
-echo "To stop: ./stop_rat.sh"
+echo "  Watch output : tail -f rat_brain.log"
+echo "  Stop brain   : ./stop_rat.sh"
 echo ""
-
-# Keep script alive
-wait $BRAIN_PID
