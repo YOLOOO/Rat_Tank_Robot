@@ -9,6 +9,7 @@ Single source of truth for all system settings.
 # ============================================================================
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 5577
+ROBOT_IP = "192.168.0.237"  # IP address of the robot
 COMMAND_TIMEOUT = 1.0  # seconds
 MAX_COMMAND_QUEUE_SIZE = 100
 
@@ -81,12 +82,10 @@ SERVO_MIN_ANGLE = 0
 SERVO_MAX_ANGLE = 180
 
 # Channel-specific angle limits (if different)
-SERVO_CH0_MIN = 90
-SERVO_CH0_MAX = 150
-SERVO_CH1_MIN = 90
-SERVO_CH1_MAX = 150
-SERVO_CH2_MIN = 0
-SERVO_CH2_MAX = 180
+SERVO_CH0_MIN = 150
+SERVO_CH0_MAX = 70
+SERVO_CH1_MIN = 70
+SERVO_CH1_MAX = 160
 
 # PCB version for servo control (same as LED PCB version)
 SERVO_PCB_VERSION = 2
