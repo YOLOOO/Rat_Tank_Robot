@@ -145,6 +145,8 @@ class MntMouseBackend:
     # ------------------------------------------------------------------
 
     def _motor_loop(self):
+        was_moving = False
+
         while self._running:
             time.sleep(self._send_interval)
 
@@ -159,6 +161,14 @@ class MntMouseBackend:
             if abs(dy) < config.MNT_DEADZONE:
                 dy = 0
 
+            is_moving = dx != 0 or dy != 0
+
+            if not is_moving:
+                if was_moving:
+                    self._on_command("MOTOR:0:0")  # one clean stop, then silence
+                was_moving = False
+                continue
+
             # Y inverted — push forward (negative Y) = forward motion
             base   = int(-dy * config.MNT_SPEED_SCALE)
             offset = int( dx * config.MNT_SPEED_SCALE)
@@ -167,3 +177,4 @@ class MntMouseBackend:
             right = _clamp(base + offset, config.MNT_MAX_DUTY)
 
             self._on_command(f"MOTOR:{left}:{right}")
+            was_moving = True
