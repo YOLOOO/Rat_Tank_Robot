@@ -114,7 +114,7 @@ MOTOR_SAFETY_TIMEOUT = 10.0  # seconds - max time a behavior can run
 # MNT TRACKBALL CONTROLLER  (dev PC side)
 # ============================================================================
 # evdev device name to match — run `python -m evdev.evtest` to find yours
-MNT_DEVICE_NAME     = "MNT Reform Trackball"
+MNT_DEVICE_NAME     = "MNT Research Reform Trackball (RP2040)"
 
 # How many MOTOR commands to send per second (avoids flooding the TCP connection)
 MNT_SEND_RATE       = 30   # Hz
