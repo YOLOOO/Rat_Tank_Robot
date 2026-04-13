@@ -85,8 +85,8 @@ SERVO_MAX_ANGLE = 180
 # Channel-specific angle limits (if different)
 SERVO_CH0_MIN = 150
 SERVO_CH0_MAX = 70
-SERVO_CH1_MIN = 70
-SERVO_CH1_MAX = 160
+SERVO_CH1_MIN = 155
+SERVO_CH1_MAX = 80
 
 # PCB version for servo control (same as LED PCB version)
 SERVO_PCB_VERSION = 2

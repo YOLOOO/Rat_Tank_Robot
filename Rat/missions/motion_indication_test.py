@@ -80,10 +80,10 @@ def _servo_moves():
     ch1_min = config.SERVO_CH1_MIN
     ch1_max = config.SERVO_CH1_MAX
     return [
-        (0, ch0_min, ch0_max,  1),   # ch0: min → max
-        (0, ch0_max, ch0_min, -1),   # ch0: max → min
-        (1, ch1_min, ch1_max,  1),   # ch1: min → max
-        (1, ch1_max, ch1_min, -1),   # ch1: max → min
+        (0, ch0_min, ch0_max),   # ch0: min → max
+        (0, ch0_max, ch0_min),   # ch0: max → min
+        (1, ch1_min, ch1_max),   # ch1: min → max
+        (1, ch1_max, ch1_min),   # ch1: max → min
     ]
 
 
@@ -97,13 +97,13 @@ def _run_servo_phase() -> bool:
         logger.info("Servo phase complete")
         return False
 
-    channel, start, end, direction = moves[_step]
+    channel, start, end = moves[_step]
     sweep_duration = abs(end - start) * _SERVO_STEP_DELAY + 0.2  # +margin
 
     elapsed = time.time() - _phase_start
 
     if elapsed < sweep_duration:
-        step_range = range(start, end + 1) if direction > 0 else range(start, end - 1, -1)
+        step_range = range(start, end + 1) if start <= end else range(start, end - 1, -1)
         for angle in step_range:
             servo.setServoPwm(str(channel), angle)
             time.sleep(_SERVO_STEP_DELAY)
