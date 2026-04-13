@@ -23,7 +23,7 @@ import subprocess
 import threading
 
 import config
-from behavior_scripts.utilities import is_halted
+from behavior_scripts.utilities.check_halt import is_halted
 
 logger = logging.getLogger(__name__)
 
