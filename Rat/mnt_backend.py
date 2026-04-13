@@ -81,6 +81,9 @@ class MntMouseBackend:
         self._send_interval = 1.0 / config.MNT_SEND_RATE
         self._last_send     = 0.0
 
+        # P-key toggle — when False no commands are forwarded to the robot
+        self._enabled       = True
+
     def start(self) -> bool:
         """Start the backend. Returns True if trackball was found."""
         if not _EVDEV_AVAILABLE:
@@ -105,6 +108,12 @@ class MntMouseBackend:
             except Exception:
                 pass
 
+    def toggle_enabled(self):
+        """Toggle whether MNT commands are forwarded to the robot (P key)."""
+        self._enabled = not self._enabled
+        state = "ENABLED" if self._enabled else "PAUSED"
+        logger.info(f"MNT backend {state}")
+
     # ------------------------------------------------------------------
     # Background read loop — buttons fire immediately
     # ------------------------------------------------------------------
@@ -123,9 +132,10 @@ class MntMouseBackend:
                             self._dy += event.value
 
                 elif event.type == ecodes.EV_KEY and event.value == 1:  # key down only
-                    cmd = self._map_button(event.code)
-                    if cmd:
-                        self._on_command(cmd)
+                    if self._enabled:
+                        cmd = self._map_button(event.code)
+                        if cmd:
+                            self._on_command(cmd)
 
         except Exception as e:
             if self._running:
@@ -160,6 +170,11 @@ class MntMouseBackend:
                 dx = 0
             if abs(dy) < config.MNT_DEADZONE:
                 dy = 0
+
+            if not self._enabled:
+                # While paused, reset moving state so we don't send a stale stop
+                was_moving = False
+                continue
 
             is_moving = dx != 0 or dy != 0
 

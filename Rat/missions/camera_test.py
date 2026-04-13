@@ -20,7 +20,6 @@ import time
 import socket
 import logging
 import subprocess
-import threading
 
 import config
 from behavior_scripts.utilities.check_halt import is_halted

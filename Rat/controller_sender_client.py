@@ -15,6 +15,7 @@ Controls (keyboard):
     D - RIGHT
     S - SELECT
     H - HALT
+    P - PAUSE / RESUME trackball (local toggle, not sent to robot)
     Q - QUIT
 
 Controls (MNT trackball):
@@ -126,6 +127,7 @@ class KeyboardBackend:
         's': CMD_SELECT,
         'h': CMD_HALT,
         'q': CMD_QUIT,
+        'p': "MNT_TOGGLE",
     }
 
     def __init__(self, on_command):
@@ -179,11 +181,18 @@ class RobotController:
     def __init__(self):
         self.connection  = RobotConnection()
         self._quit_event = threading.Event()
+        self._mnt        = None  # set in run() once backend is created
 
     def _on_command(self, command: str):
         if command == CMD_QUIT:
             print("\nQuitting...")
             self._quit_event.set()
+            return
+        if command == "MNT_TOGGLE":
+            if self._mnt is not None:
+                self._mnt.toggle_enabled()
+                state = "ENABLED" if self._mnt._enabled else "PAUSED"
+                print(f"  Trackball {state}")
             return
         self.connection.ensure_connected()
         self.connection.send(command)
@@ -196,6 +205,7 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
+        print("  P - PAUSE/RESUME trackball")
         print("  Q - QUIT")
         print("  Trackball active if plugged in")
         print("=" * 50 + "\n")
@@ -209,8 +219,8 @@ class RobotController:
         keyboard.start()
 
         # Start MNT backend if available
-        mnt        = MntMouseBackend(on_command=self._on_command)
-        mnt_active = mnt.start()
+        self._mnt  = MntMouseBackend(on_command=self._on_command)
+        mnt_active = self._mnt.start()
         if mnt_active:
             logger.info("MNT trackball active")
         else:
@@ -223,7 +233,7 @@ class RobotController:
         finally:
             keyboard.stop()
             if mnt_active:
-                mnt.stop()
+                self._mnt.stop()
             self.connection.disconnect()
             print("Controller stopped.")
 
