@@ -24,7 +24,7 @@ MISSIONS = {
     "SENSORY_TEST":   ("missions.sensory_test",           (0, 255, 255), 2),  # Cyan   - sensor readout test
     "REMOTE_CONTROL": ("missions.remote_control",         (0, 100, 255), 3),  # Blue   - trackball control
     #"WARS":     ("missions.robot_wars",      (255, 0, 0),   4),  # Red
-    #"OBSTACLE": ("missions.obstacle_course", (255, 165, 0), 5),  # Orange
+    "CAMERA_TEST": ("missions.camera_test", (255, 165, 0), 5),  # Orange
 }
 
 # ============================================================================
@@ -119,6 +119,13 @@ EMERGENCY_STOP_PIN = 26  # Optional: GPIO for emergency stop button
 STATE_UPDATE_INTERVAL = 0.05  # 50ms - main loop tick
 COMMAND_POLL_INTERVAL = 0.01  # 10ms - check for new commands
 MOTOR_SAFETY_TIMEOUT = 10.0  # seconds - max time a behavior can run
+
+#=============================================================================
+# CAMERA CONFIGURATION
+#=============================================================================
+CAMERA_TEST_PHOTO  = "/test_photo/camera_test.jpg"
+CAMERA_STREAM_PORT = 8888
+CAMERA_STREAM_HOST = "0.0.0.0"
 
 # ============================================================================
 # MNT TRACKBALL CONTROLLER  (dev PC side)
