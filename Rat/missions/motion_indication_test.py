@@ -6,6 +6,7 @@ Called each brain tick via run(brain). Returns False when all phases complete.
 
 Motor API  : import common_hardware.motor as motor  →  motor.set_motors(left, right)
 LED API    : get_led_controller()                   →  led.set_all_led_color(r, g, b)
+Servo API  : get_led_controller()                   →  led.set_all_led_color(r, g, b)
 Servo API  : get_servo_controller()                 →  servo.setServoPwm('0', angle)
 """
 
@@ -80,10 +81,13 @@ def _servo_moves():
     ch1_min = config.SERVO_CH1_MIN
     ch1_max = config.SERVO_CH1_MAX
     return [
-        (0, ch0_min, ch0_max),   # ch0: min → max
-        (0, ch0_max, ch0_min),   # ch0: max → min
-        (1, ch1_min, ch1_max),   # ch1: min → max
-        (1, ch1_max, ch1_min),   # ch1: max → min
+        (1, ch1_min, ch1_min),   # grip: open before arm moves (arm starts at min/down)
+        (0, ch0_min, ch0_max),   # ch0 arm: min → max
+        (0, ch0_max, ch0_min),   # ch0 arm: max → min
+        (1, ch1_min, ch1_max),   # ch1 grip: open → close
+        (1, ch1_max, ch1_min),   # ch1 grip: close → open
+        (0, ch0_min, ch0_max),   # arm: lift to max (parked up)
+        (1, ch1_min, ch1_max),   # grip: close (parked closed)
     ]
 
 
