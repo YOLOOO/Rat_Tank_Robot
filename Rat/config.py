@@ -123,7 +123,7 @@ MOTOR_SAFETY_TIMEOUT = 10.0  # seconds - max time a behavior can run
 #=============================================================================
 # CAMERA CONFIGURATION
 #=============================================================================
-CAMERA_TEST_PHOTO  = "/test_photo/camera_test.jpg"
+CAMERA_TEST_PHOTO  = "/home/rat/test_photo/camera_test.jpg"
 CAMERA_STREAM_PORT = 8888
 CAMERA_STREAM_HOST = "0.0.0.0"
 
