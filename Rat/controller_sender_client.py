@@ -211,9 +211,13 @@ class DrivePoller:
         self._running = False
 
     def _loop(self):
+        _last_state = (False, False)
         while self._running:
             fwd = _is_key_held(_VK_Y)
             rev = _is_key_held(_VK_U)
+            if (fwd, rev) != _last_state:
+                print(f"[DRIVE] fwd={fwd} rev={rev}", flush=True)
+                _last_state = (fwd, rev)
             self._mnt.set_drive(fwd, rev)
             time.sleep(self._INTERVAL)
 
