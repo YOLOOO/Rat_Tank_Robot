@@ -15,8 +15,8 @@ Controls (keyboard):
     D - RIGHT
     S - SELECT
     H - HALT
-    Y - FORWARD  (hold to drive, release to stop)
-    U - BACKWARD (hold to drive, release to stop)
+    Y - FORWARD
+    U - BACKWARD
     P - PAUSE / RESUME trackball (local toggle, not sent to robot)
     Q - QUIT
 
@@ -28,7 +28,6 @@ Controls (MNT trackball):
 """
 
 import sys
-import time
 import socket
 import logging
 import threading
@@ -45,29 +44,17 @@ logging.basicConfig(
 
 if platform.system() == "Windows":
     import msvcrt
-    import ctypes
-    _user32 = ctypes.windll.user32
-    def _is_key_held(vk: int) -> bool:
-        return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
 else:
     import tty
     import termios
-    try:
-        import keyboard as _kb
-        def _is_key_held(vk: int) -> bool:
-            return _kb.is_pressed(chr(vk).lower())
-    except ImportError:
-        def _is_key_held(vk: int) -> bool:
-            return False
 
-_VK_Y = 0x59
-_VK_U = 0x55
-
-CMD_LEFT   = "LEFT"
-CMD_RIGHT  = "RIGHT"
-CMD_SELECT = "SELECT"
-CMD_HALT   = "HALT"
-CMD_QUIT   = "QUIT"
+CMD_LEFT     = "LEFT"
+CMD_RIGHT    = "RIGHT"
+CMD_SELECT   = "SELECT"
+CMD_HALT     = "HALT"
+CMD_QUIT     = "QUIT"
+CMD_FORWARD  = f"MOTOR:{config.MNT_MAX_DUTY}:{config.MNT_MAX_DUTY}"
+CMD_BACKWARD = f"MOTOR:{-config.MNT_MAX_DUTY}:{-config.MNT_MAX_DUTY}"
 
 
 # ------------------------------------------------------------------
@@ -145,6 +132,8 @@ class KeyboardBackend:
         'h': CMD_HALT,
         'q': CMD_QUIT,
         'p': "MNT_TOGGLE",
+        'y': CMD_FORWARD,
+        'u': CMD_BACKWARD,
     }
 
     def __init__(self, on_command):
@@ -185,44 +174,6 @@ class KeyboardBackend:
 
 
 # ------------------------------------------------------------------
-# Drive poller — holds Y/U key state at 50 Hz, updates MNT flags
-# ------------------------------------------------------------------
-
-class DrivePoller:
-    """
-    Polls whether Y (forward) or U (backward) are physically held.
-    Updates MNT backend drive flags directly so motors run only while
-    the key is down and stop the moment it is released.
-    """
-
-    _INTERVAL = 0.02  # 50 Hz
-
-    def __init__(self, mnt: MntMouseBackend):
-        self._mnt     = mnt
-        self._thread  = None
-        self._running = False
-
-    def start(self):
-        self._running = True
-        self._thread  = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-
-    def _loop(self):
-        _last_state = (False, False)
-        while self._running:
-            fwd = _is_key_held(_VK_Y)
-            rev = _is_key_held(_VK_U)
-            if (fwd, rev) != _last_state:
-                print(f"[DRIVE] fwd={fwd} rev={rev}", flush=True)
-                _last_state = (fwd, rev)
-            self._mnt.set_drive(fwd, rev)
-            time.sleep(self._INTERVAL)
-
-
-# ------------------------------------------------------------------
 # Combined controller
 # ------------------------------------------------------------------
 
@@ -260,7 +211,7 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
-        print("  Y - FORWARD (hold)    U - BACKWARD (hold)")
+        print("  Y - FORWARD           U - BACKWARD")
         print("  P - PAUSE/RESUME trackball")
         print("  Q - QUIT")
         print("  Trackball active if plugged in")
@@ -282,16 +233,11 @@ class RobotController:
         else:
             logger.info("MNT trackball not found — keyboard only")
 
-        # Drive poller — detects Y/U hold state regardless of MNT availability
-        drive_poller = DrivePoller(self._mnt)
-        drive_poller.start()
-
         try:
             self._quit_event.wait()  # Block until Q is pressed
         except KeyboardInterrupt:
             print("\nInterrupted")
         finally:
-            drive_poller.stop()
             keyboard.stop()
             if mnt_active:
                 self._mnt.stop()

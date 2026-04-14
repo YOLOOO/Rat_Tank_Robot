@@ -87,22 +87,17 @@ class MntMouseBackend:
         self._enabled       = True
 
     def start(self) -> bool:
-        """Start the backend. Returns True if trackball was found.
-
-        The motor loop always starts so Y/U keyboard drive works even without
-        the trackball.  The read loop only starts when a device is available.
-        """
-        self._running = True
-        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
-        self._motor_thread.start()
-
+        """Start the backend. Returns True if trackball was found."""
         if not _EVDEV_AVAILABLE:
             return False
         self._device = _find_device()
         if self._device is None:
             return False
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._running = True
+        self._thread  = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
+        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
+        self._motor_thread.start()
         logger.info("MNT backend started")
         return True
 
@@ -170,45 +165,39 @@ class MntMouseBackend:
 
     def _motor_loop(self):
         was_moving = False
-        print("[MNT] motor loop started", flush=True)
 
-        try:
-            while self._running:
-                time.sleep(self._send_interval)
+        while self._running:
+            time.sleep(self._send_interval)
 
-                with self._axis_lock:
-                    dx      = self._dx
-                    self._dx = 0
+            with self._axis_lock:
+                dx      = self._dx
+                self._dx = 0
 
-                if abs(dx) < config.MNT_DEADZONE:
-                    dx = 0
+            if abs(dx) < config.MNT_DEADZONE:
+                dx = 0
 
-                if not self._enabled:
-                    was_moving = False
-                    continue
+            if not self._enabled:
+                was_moving = False
+                continue
 
-                # Base speed from held button — both buttons cancel out
-                if self._fwd_held and not self._rev_held:
-                    base = config.MNT_MAX_DUTY
-                elif self._rev_held and not self._fwd_held:
-                    base = -config.MNT_MAX_DUTY
-                else:
-                    base = 0
+            # Base speed from held button — both buttons cancel out
+            if self._fwd_held and not self._rev_held:
+                base = config.MNT_MAX_DUTY
+            elif self._rev_held and not self._fwd_held:
+                base = -config.MNT_MAX_DUTY
+            else:
+                base = 0
 
-                if base == 0:
-                    if was_moving:
-                        self._on_command("MOTOR:0:0")
-                    was_moving = False
-                    continue
+            if base == 0:
+                if was_moving:
+                    self._on_command("MOTOR:0:0")
+                was_moving = False
+                continue
 
-                # Differential steering: X offsets one motor down
-                offset = int(dx * config.MNT_SPEED_SCALE)
-                left  = _clamp(base - offset, config.MNT_MAX_DUTY)
-                right = _clamp(base + offset, config.MNT_MAX_DUTY)
+            # Differential steering: X offsets one motor down
+            offset = int(dx * config.MNT_SPEED_SCALE)
+            left  = _clamp(base - offset, config.MNT_MAX_DUTY)
+            right = _clamp(base + offset, config.MNT_MAX_DUTY)
 
-                print(f"[MNT] sending MOTOR:{left}:{right}", flush=True)
-                self._on_command(f"MOTOR:{left}:{right}")
-                was_moving = True
-        except Exception as e:
-            print(f"[MNT] motor loop CRASHED: {e}", flush=True)
-            raise
+            self._on_command(f"MOTOR:{left}:{right}")
+            was_moving = True
