@@ -4,10 +4,10 @@ MNT Reform Optical Trackball Backend (dev PC)
 Reads the MNT trackball via evdev and fires commands via callback.
 
 Drive model:
-    BTN_EXTRA (left extra)  — hold for full-speed forward
-    BTN_SIDE  (right extra) — hold for full-speed backward
+    Y key (keyboard)        — toggle full-speed forward latch
+    U key (keyboard)        — toggle full-speed backward latch
     Ball X axis             — differential steering: offsets left/right motor
-                              while a direction button is held
+                              while a direction latch is active
     Ball Y axis             — not used
 
 Arm / halt:
@@ -27,7 +27,6 @@ from typing import Optional, Callable
 import config
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 try:
     import evdev
@@ -119,6 +118,26 @@ class MntMouseBackend:
         state = "ENABLED" if self._enabled else "PAUSED"
         logger.info(f"MNT backend {state}")
 
+    def drive_forward(self):
+        """Toggle forward latch (Y key). Press again to stop."""
+        if self._fwd_held:
+            self._fwd_held = False
+            logger.info("Drive: stopped")
+        else:
+            self._fwd_held = True
+            self._rev_held = False
+            logger.info("Drive: forward")
+
+    def drive_backward(self):
+        """Toggle backward latch (U key). Press again to stop."""
+        if self._rev_held:
+            self._rev_held = False
+            logger.info("Drive: stopped")
+        else:
+            self._rev_held = True
+            self._fwd_held = False
+            logger.info("Drive: backward")
+
     # ------------------------------------------------------------------
     # Background read loop
     # ------------------------------------------------------------------
@@ -129,27 +148,16 @@ class MntMouseBackend:
                 if not self._running:
                     break
 
-                # Log every non-sync event for diagnostics
-                if event.type != ecodes.EV_SYN:
-                    logger.debug(f"EVENT type={event.type} code={event.code} value={event.value}")
-
                 if event.type == ecodes.EV_REL:
                     with self._axis_lock:
                         if event.code == ecodes.REL_X:
                             self._dx += event.value
                         # REL_Y intentionally ignored
 
-                elif event.type == ecodes.EV_KEY:
-                    # Direction buttons — track hold state on both press and release
-                    if event.code == ecodes.BTN_EXTRA:
-                        self._fwd_held = (event.value == 1) and self._enabled
-                    elif event.code == ecodes.BTN_SIDE:
-                        self._rev_held = (event.value == 1) and self._enabled
-                    # One-shot commands on key down only
-                    elif event.value == 1 and self._enabled:
-                        cmd = self._map_button(event.code)
-                        if cmd:
-                            self._on_command(cmd)
+                elif event.type == ecodes.EV_KEY and event.value == 1 and self._enabled:
+                    cmd = self._map_button(event.code)
+                    if cmd:
+                        self._on_command(cmd)
 
         except Exception as e:
             if self._running:

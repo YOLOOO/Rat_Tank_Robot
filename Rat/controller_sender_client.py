@@ -19,12 +19,10 @@ Controls (keyboard):
     Q - QUIT
 
 Controls (MNT trackball):
-    Left extra (hold) → motors forward full speed
-    Right extra (hold)→ motors backward full speed
-    Ball X            → differential steering (slows one motor while driving)
-    Left button       → ARM toggle
-    Right button      → GRIP toggle
-    Middle button     → HALT
+    Ball X        → differential steering while driving
+    Left button   → ARM toggle
+    Right button  → GRIP toggle
+    Middle button → HALT
 """
 
 import sys
@@ -130,6 +128,8 @@ class KeyboardBackend:
         'h': CMD_HALT,
         'q': CMD_QUIT,
         'p': "MNT_TOGGLE",
+        'y': "DRIVE_FWD",
+        'u': "DRIVE_REV",
     }
 
     def __init__(self, on_command):
@@ -196,6 +196,14 @@ class RobotController:
                 state = "ENABLED" if self._mnt._enabled else "PAUSED"
                 print(f"  Trackball {state}")
             return
+        if command == "DRIVE_FWD":
+            if self._mnt is not None:
+                self._mnt.drive_forward()
+            return
+        if command == "DRIVE_REV":
+            if self._mnt is not None:
+                self._mnt.drive_backward()
+            return
         self.connection.ensure_connected()
         self.connection.send(command)
         if command == CMD_HALT:
@@ -207,6 +215,7 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
+        print("  Y - FORWARD (toggle)  U - BACKWARD (toggle)")
         print("  P - PAUSE/RESUME trackball")
         print("  Q - QUIT")
         print("  Trackball active if plugged in")
