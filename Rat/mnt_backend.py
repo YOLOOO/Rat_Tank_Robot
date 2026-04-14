@@ -129,6 +129,10 @@ class MntMouseBackend:
                 if not self._running:
                     break
 
+                # Log every non-sync event for diagnostics
+                if event.type != ecodes.EV_SYN:
+                    logger.debug(f"EVENT type={event.type} code={event.code} value={event.value}")
+
                 if event.type == ecodes.EV_REL:
                     with self._axis_lock:
                         if event.code == ecodes.REL_X:
@@ -136,8 +140,6 @@ class MntMouseBackend:
                         # REL_Y intentionally ignored
 
                 elif event.type == ecodes.EV_KEY:
-                    if event.value == 1:  # log all key-downs for diagnostics
-                        logger.debug(f"BTN code={event.code} ({ecodes.KEY.get(event.code, '?')})")
                     # Direction buttons — track hold state on both press and release
                     if event.code == ecodes.BTN_EXTRA:
                         self._fwd_held = (event.value == 1) and self._enabled
