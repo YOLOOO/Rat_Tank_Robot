@@ -116,7 +116,8 @@ def run(brain) -> bool:
                         [
                                 "rpicam-vid",
                                 "-t", "0",
-                                "--codec", "mjpeg",
+                                "--codec", "libav",
+                                "--libav-format", "mpegts",
                                 "--framerate", "30",
                                 "--listen",
                                 "-o", stream_url
