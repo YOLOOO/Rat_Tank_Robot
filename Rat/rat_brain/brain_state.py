@@ -17,7 +17,7 @@ from enum import Enum
 import config
 from rat_brain.control_receiver_server import get_command_server
 import common_hardware.motor as motor
-from common_hardware import get_led_controller
+from common_hardware import get_led_controller, get_servo_controller
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG if config.DEBUG else logging.INFO)
@@ -122,6 +122,12 @@ class RatBrain:
     def _process_halt(self):
         self.halt_flag = True
         motor.stop()
+        try:
+            servo = get_servo_controller()
+            servo.setServoStop('0')
+            servo.setServoStop('1')
+        except Exception as e:
+            logger.warning(f"Servo stop error: {e}")
         logger.warning("HALT — all motion stopped")
         self._stop_mission()
         self.command_server.clear_halt()
@@ -249,6 +255,12 @@ class RatBrain:
         logger.info("Cleaning up...")
         self._stop_mission()
         motor.cleanup()
+        try:
+            servo = get_servo_controller()
+            servo.setServoStop('0')
+            servo.setServoStop('1')
+        except Exception as e:
+            logger.warning(f"Servo cleanup error: {e}")
         try:
             get_led_controller().led_close()
         except Exception as e:

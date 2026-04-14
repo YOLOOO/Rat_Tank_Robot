@@ -81,13 +81,13 @@ def _servo_moves():
     ch1_min = config.SERVO_CH1_MIN
     ch1_max = config.SERVO_CH1_MAX
     return [
-        (1, ch1_min, ch1_min),   # grip: open before arm moves (arm starts at min/down)
-        (0, ch0_min, ch0_max),   # ch0 arm: min → max
-        (0, ch0_max, ch0_min),   # ch0 arm: max → min
-        (1, ch1_min, ch1_max),   # ch1 grip: open → close
-        (1, ch1_max, ch1_min),   # ch1 grip: close → open
-        (0, ch0_min, ch0_max),   # arm: lift to max (parked up)
-        (1, ch1_min, ch1_max),   # grip: close (parked closed)
+        (1, ch1_min, ch1_min),   # ensure grip open (arm starts at min/down)
+        (0, ch0_min, ch0_max),   # arm: up
+        (1, ch1_min, ch1_max),   # grip: open → close  (arm is up)
+        (1, ch1_max, ch1_min),   # grip: close → open  (arm is up, grip open before arm descends)
+        (0, ch0_max, ch0_min),   # arm: down  (grip is open)
+        (0, ch0_min, ch0_max),   # arm: up  (park up)
+        (1, ch1_min, ch1_max),   # grip: close  (park closed, arm is up)
     ]
 
 
