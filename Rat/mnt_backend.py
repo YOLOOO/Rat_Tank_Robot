@@ -118,25 +118,12 @@ class MntMouseBackend:
         state = "ENABLED" if self._enabled else "PAUSED"
         logger.info(f"MNT backend {state}")
 
-    def drive_forward(self):
-        """Toggle forward latch (Y key). Press again to stop."""
-        if self._fwd_held:
-            self._fwd_held = False
-            logger.info("Drive: stopped")
-        else:
-            self._fwd_held = True
-            self._rev_held = False
-            logger.info("Drive: forward")
-
-    def drive_backward(self):
-        """Toggle backward latch (U key). Press again to stop."""
-        if self._rev_held:
-            self._rev_held = False
-            logger.info("Drive: stopped")
-        else:
-            self._rev_held = True
-            self._fwd_held = False
-            logger.info("Drive: backward")
+    def set_drive(self, fwd: bool, rev: bool):
+        """Set drive direction from polled key hold state (called at 50 Hz)."""
+        if not self._enabled:
+            fwd = rev = False
+        self._fwd_held = fwd and not rev
+        self._rev_held = rev and not fwd
 
     # ------------------------------------------------------------------
     # Background read loop
