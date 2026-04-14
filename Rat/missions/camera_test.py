@@ -118,7 +118,10 @@ def run(brain) -> bool:
                                 "-t", "0",
                                 "--codec", "libav",
                                 "--libav-format", "mpegts",
+                                "--width", "1280",
+                                "--height", "720",
                                 "--framerate", "30",
+                                "--bitrate", "2000000",
                                 "--listen",
                                 "-o", stream_url
                         ],
@@ -128,11 +131,15 @@ def run(brain) -> bool:
 
                 robot_ip = _get_local_ip()
                 viewer_url = f"tcp://{robot_ip}:{config.CAMERA_STREAM_PORT}"
+                vlc_cmd = f"vlc --network-caching 300 {viewer_url}"
 
                 logger.info(f"Step 3 - Stream started (PID {_stream_proc.pid})")
                 logger.info("=" * 55)
-                logger.info(" Open in VLC on your dev PC:")
-                logger.info(f" Media -> Open Network Stream -> {viewer_url}")
+                logger.info(" Open in VLC on your dev PC (low-lag command):")
+                logger.info(f"   {vlc_cmd}")
+                logger.info(" Or: Media -> Open Network Stream ->")
+                logger.info(f"   {viewer_url}")
+                logger.info(" (GUI: set Tools->Prefs->Input/Codecs->Network caching to 300ms)")
                 logger.info(" Send HALT to stop the stream and end this mission")
                 logger.info("=" * 55)
                 _led_pass()

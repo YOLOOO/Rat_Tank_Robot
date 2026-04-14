@@ -3,18 +3,17 @@ MNT Reform Optical Trackball Backend (dev PC)
 =============================================
 Reads the MNT trackball via evdev and fires commands via callback.
 
-Ball → differential motor control:
-    Y axis  → base speed (forward / backward)
-    X axis  → turn offset (differential steering)
-    left  = clamp(base - offset)
-    right = clamp(base + offset)
+Drive model:
+    BTN_EXTRA (left extra)  — hold for full-speed forward
+    BTN_SIDE  (right extra) — hold for full-speed backward
+    Ball X axis             — differential steering: offsets left/right motor
+                              while a direction button is held
+    Ball Y axis             — not used
 
-Buttons:
-    BTN_LEFT   (primary)   → ARM_TOGGLE
-    BTN_RIGHT  (secondary) → GRIP_TOGGLE
-    BTN_MIDDLE (middle)    → HALT
-    BTN_SIDE               → spare
-    BTN_EXTRA              → spare
+Arm / halt:
+    BTN_LEFT   (primary)    → ARM_TOGGLE
+    BTN_RIGHT  (secondary)  → GRIP_TOGGLE
+    BTN_MIDDLE              → HALT
 
 Install dependency on dev PC:
     pip install evdev
@@ -72,10 +71,13 @@ class MntMouseBackend:
         self._thread        = None
         self._running       = False
 
-        # Accumulated axis deltas between send ticks
+        # Accumulated X delta between motor send ticks (Y ignored)
         self._dx            = 0
-        self._dy            = 0
         self._axis_lock     = threading.Lock()
+
+        # Hold state for direction buttons
+        self._fwd_held      = False  # BTN_EXTRA — left extra
+        self._rev_held      = False  # BTN_SIDE  — right extra
 
         # Motor send rate limiting
         self._send_interval = 1.0 / config.MNT_SEND_RATE
@@ -94,7 +96,6 @@ class MntMouseBackend:
         self._running = True
         self._thread  = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
-        # Motor tick runs on its own timer thread
         self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
         self._motor_thread.start()
         logger.info("MNT backend started")
@@ -111,11 +112,14 @@ class MntMouseBackend:
     def toggle_enabled(self):
         """Toggle whether MNT commands are forwarded to the robot (P key)."""
         self._enabled = not self._enabled
+        if not self._enabled:
+            self._fwd_held = False
+            self._rev_held = False
         state = "ENABLED" if self._enabled else "PAUSED"
         logger.info(f"MNT backend {state}")
 
     # ------------------------------------------------------------------
-    # Background read loop — buttons fire immediately
+    # Background read loop
     # ------------------------------------------------------------------
 
     def _read_loop(self):
@@ -128,11 +132,16 @@ class MntMouseBackend:
                     with self._axis_lock:
                         if event.code == ecodes.REL_X:
                             self._dx += event.value
-                        elif event.code == ecodes.REL_Y:
-                            self._dy += event.value
+                        # REL_Y intentionally ignored
 
-                elif event.type == ecodes.EV_KEY and event.value == 1:  # key down only
-                    if self._enabled:
+                elif event.type == ecodes.EV_KEY:
+                    # Direction buttons — track hold state on both press and release
+                    if event.code == ecodes.BTN_EXTRA:
+                        self._fwd_held = (event.value == 1) and self._enabled
+                    elif event.code == ecodes.BTN_SIDE:
+                        self._rev_held = (event.value == 1) and self._enabled
+                    # One-shot commands on key down only
+                    elif event.value == 1 and self._enabled:
                         cmd = self._map_button(event.code)
                         if cmd:
                             self._on_command(cmd)
@@ -148,10 +157,10 @@ class MntMouseBackend:
             return "GRIP_TOGGLE"
         elif code == ecodes.BTN_MIDDLE:
             return "HALT"
-        return None  # BTN_SIDE, BTN_EXTRA spare
+        return None
 
     # ------------------------------------------------------------------
-    # Motor loop — rate limited, converts accumulated deltas to MOTOR cmd
+    # Motor loop — rate limited, button-held base speed + X differential
     # ------------------------------------------------------------------
 
     def _motor_loop(self):
@@ -161,33 +170,32 @@ class MntMouseBackend:
             time.sleep(self._send_interval)
 
             with self._axis_lock:
-                dx, dy = self._dx, self._dy
+                dx      = self._dx
                 self._dx = 0
-                self._dy = 0
 
-            # Apply deadzone
             if abs(dx) < config.MNT_DEADZONE:
                 dx = 0
-            if abs(dy) < config.MNT_DEADZONE:
-                dy = 0
 
             if not self._enabled:
-                # While paused, reset moving state so we don't send a stale stop
                 was_moving = False
                 continue
 
-            is_moving = dx != 0 or dy != 0
+            # Base speed from held button — both buttons cancel out
+            if self._fwd_held and not self._rev_held:
+                base = config.MNT_MAX_DUTY
+            elif self._rev_held and not self._fwd_held:
+                base = -config.MNT_MAX_DUTY
+            else:
+                base = 0
 
-            if not is_moving:
+            if base == 0:
                 if was_moving:
-                    self._on_command("MOTOR:0:0")  # one clean stop, then silence
+                    self._on_command("MOTOR:0:0")
                 was_moving = False
                 continue
 
-            # Y inverted — push forward (negative Y) = forward motion
-            base   = int( dy * config.MNT_SPEED_SCALE)
-            offset = int( dx * config.MNT_SPEED_SCALE)
-
+            # Differential steering: X offsets one motor down
+            offset = int(dx * config.MNT_SPEED_SCALE)
             left  = _clamp(base - offset, config.MNT_MAX_DUTY)
             right = _clamp(base + offset, config.MNT_MAX_DUTY)
 
