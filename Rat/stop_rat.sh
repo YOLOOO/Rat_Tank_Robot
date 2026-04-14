@@ -2,8 +2,8 @@
 #
 # STOP RAT BRAIN
 # ==============
-# Stops the robot brain server and ensures motors and LEDs are off.
-# Uses SIGINT so Python's KeyboardInterrupt handler fires and cleanup() runs.
+# Stops the robot brain and ensures motors and LEDs are left off.
+# Escalates: SIGINT → SIGTERM → SIGKILL with verification at each step.
 #
 
 echo "=========================================="
@@ -13,13 +13,40 @@ echo "=========================================="
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
-echo "Stopping RAT BRAIN..."
+if ! pgrep -f "python3.*brain_state.py" > /dev/null 2>&1; then
+    echo "RAT BRAIN is not running."
+    echo ""
+    exit 0
+fi
 
+echo "Sending SIGINT (clean shutdown)..."
 pkill -SIGINT -f "python3.*brain_state.py" || true
+sleep 3
 
-# Give cleanup() time to run (motors off, LEDs off, sockets closed)
+if ! pgrep -f "python3.*brain_state.py" > /dev/null 2>&1; then
+    echo "RAT BRAIN stopped cleanly."
+    echo ""
+    exit 0
+fi
+
+echo "Still running — sending SIGTERM..."
+pkill -SIGTERM -f "python3.*brain_state.py" || true
 sleep 2
 
-echo ""
-echo "RAT BRAIN stopped."
+if ! pgrep -f "python3.*brain_state.py" > /dev/null 2>&1; then
+    echo "RAT BRAIN stopped."
+    echo ""
+    exit 0
+fi
+
+echo "Still running — sending SIGKILL..."
+pkill -SIGKILL -f "python3.*brain_state.py" || true
+sleep 1
+
+if pgrep -f "python3.*brain_state.py" > /dev/null 2>&1; then
+    echo "WARNING: RAT BRAIN could not be killed."
+    exit 1
+fi
+
+echo "RAT BRAIN killed."
 echo ""

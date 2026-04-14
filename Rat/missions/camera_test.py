@@ -117,11 +117,12 @@ def run(brain) -> bool:
                                 "rpicam-vid",
                                 "-t", "0",
                                 "--inline",
+                                "--framerate", "30",
                                 "--listen",
                                 "-o", stream_url
                         ],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
                 )
 
                 robot_ip = _get_local_ip()

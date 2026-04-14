@@ -20,11 +20,10 @@ MAX_COMMAND_QUEUE_SIZE = 100
 # Behaviors (behavior_scripts/) are building blocks used by missions — not registered here.
 # Format: {name: (module_path, color_tuple, display_order)}
 MISSIONS = {
-    "MOTION_TEST":    ("missions.motion_indication_test", (255, 165, 0), 1),  # Orange - LED/servo/motor test
-    "SENSORY_TEST":   ("missions.sensory_test",           (0, 255, 255), 2),  # Cyan   - sensor readout test
-    "REMOTE_CONTROL": ("missions.remote_control",         (0, 100, 255), 3),  # Blue   - trackball control
-    #"WARS":     ("missions.robot_wars",      (255, 0, 0),   4),  # Red
-    "CAMERA_TEST": ("missions.camera_test", (255, 165, 0), 5),  # Orange
+    "MOTION_TEST":    ("missions.motion_indication_test", (255, 0,   0),   1),  # Red     - LED/servo/motor test
+    "SENSORY_TEST":   ("missions.sensory_test",           (0,   255, 0),   2),  # Green   - sensor readout test
+    "REMOTE_CONTROL": ("missions.remote_control",         (0,   0,   255), 3),  # Blue    - trackball control
+    "CAMERA_TEST":    ("missions.camera_test",            (255, 0,   255), 4),  # Magenta - camera test
 }
 
 # ============================================================================

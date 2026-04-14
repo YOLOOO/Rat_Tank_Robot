@@ -186,7 +186,8 @@ class RatBrain:
             self.state = RobotState.ERROR
             return
 
-        module = mission_data["module"]
+        module = importlib.reload(mission_data["module"])
+        mission_data["module"] = module
         if not hasattr(module, "run"):
             logger.error(f"Mission {name} has no run() function")
             self.state = RobotState.ERROR
@@ -248,6 +249,10 @@ class RatBrain:
         logger.info("Cleaning up...")
         self._stop_mission()
         motor.cleanup()
+        try:
+            get_led_controller().led_close()
+        except Exception as e:
+            logger.warning(f"LED cleanup error: {e}")
         self.command_server.stop()
         logger.info("RAT BRAIN STOPPED")
 
