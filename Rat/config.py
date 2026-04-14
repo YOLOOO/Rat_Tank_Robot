@@ -76,16 +76,11 @@ SERVO_CHANNEL_1 = 8   # GPIO 8 - servo 1 (e.g., tilt)
 SERVO_CHANNEL_2 = 25  # GPIO 25 - servo 2 (optional, reserved)
 SERVO_PWM_FREQ = 50   # Hz (standard servo frequency)
 
-# Default servo angles (0-180)
-SERVO_CENTER_ANGLE = 90
-SERVO_MIN_ANGLE = 0
-SERVO_MAX_ANGLE = 180
-
 # Channel-specific angle limits (if different)
 SERVO_CH0_MIN = 150
 SERVO_CH0_MAX = 70
-SERVO_CH1_MIN = 155
-SERVO_CH1_MAX = 80
+SERVO_CH1_MIN = 80
+SERVO_CH1_MAX = 155
 
 # PCB version for servo control (same as LED PCB version)
 SERVO_PCB_VERSION = 2
