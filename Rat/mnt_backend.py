@@ -87,17 +87,22 @@ class MntMouseBackend:
         self._enabled       = True
 
     def start(self) -> bool:
-        """Start the backend. Returns True if trackball was found."""
+        """Start the backend. Returns True if trackball was found.
+
+        The motor loop always starts so Y/U keyboard drive works even without
+        the trackball.  The read loop only starts when a device is available.
+        """
+        self._running = True
+        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
+        self._motor_thread.start()
+
         if not _EVDEV_AVAILABLE:
             return False
         self._device = _find_device()
         if self._device is None:
             return False
-        self._running = True
-        self._thread  = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
-        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
-        self._motor_thread.start()
         logger.info("MNT backend started")
         return True
 
