@@ -177,6 +177,12 @@ def run(brain) -> bool:
 
         elif _phase == 1:
             if not _run_servo_phase():
+                # Explicitly park arm up before motor phase so movement doesn't swing it
+                try:
+                    servo = get_servo_controller()
+                    servo.setServoPwm('0', config.SERVO_CH0_MAX)
+                except Exception as e:
+                    logger.warning(f"Arm park error: {e}")
                 _phase       = 2
                 _step        = 0
                 _phase_start = time.time()
