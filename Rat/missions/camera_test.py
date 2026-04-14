@@ -116,7 +116,7 @@ def run(brain) -> bool:
                         [
                                 "rpicam-vid",
                                 "-t", "0",
-                                "--inline",
+                                "--codec", "mjpeg",
                                 "--framerate", "30",
                                 "--listen",
                                 "-o", stream_url
@@ -126,7 +126,7 @@ def run(brain) -> bool:
                 )
 
                 robot_ip = _get_local_ip()
-                viewer_url = f"tcp/h264://{robot_ip}:{config.CAMERA_STREAM_PORT}"
+                viewer_url = f"tcp://{robot_ip}:{config.CAMERA_STREAM_PORT}"
 
                 logger.info(f"Step 3 - Stream started (PID {_stream_proc.pid})")
                 logger.info("=" * 55)
