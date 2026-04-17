@@ -10,6 +10,7 @@ HALT:   checked directly from server halt_flag every tick — never queued,
 """
 
 import logging
+import signal
 import time
 import importlib
 from enum import Enum
@@ -35,6 +36,7 @@ class RatBrain:
     def __init__(self):
         self.state          = RobotState.IDLE
         self.halt_flag      = False  # Readable by behaviors via check_halt.py
+        self._running       = False  # Set to False to exit the main loop cleanly
 
         self.command_server = get_command_server()
 
@@ -118,6 +120,7 @@ class RatBrain:
             self._process_halt()
             return True
         return False
+
 
     def _process_halt(self):
         self.halt_flag = True
@@ -232,18 +235,23 @@ class RatBrain:
             logger.error(f"Brain update error: {e}")
             self.state = RobotState.ERROR
 
+    def _handle_signal(self, signum, _frame):
+        logger.info(f"Signal {signum} received — shutting down")
+        self._running = False
+
     def run(self):
         logger.info("RAT BRAIN STARTED")
+        signal.signal(signal.SIGINT,  self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
+        self._running = True
         self.command_server.start()
         self._print_menu()
 
         try:
-            while True:
+            while self._running:
                 self.update()
                 time.sleep(config.STATE_UPDATE_INTERVAL)
-
-        except KeyboardInterrupt:
-            logger.info("Interrupted")
 
         except Exception as e:
             logger.error(f"Fatal error: {e}")

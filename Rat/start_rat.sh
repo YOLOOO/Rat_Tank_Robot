@@ -37,6 +37,7 @@ echo ""
 echo "Starting RAT BRAIN..."
 nohup python3 rat_brain/brain_state.py > rat_brain.log 2>&1 &
 BRAIN_PID=$!
+echo "$BRAIN_PID" > rat_brain.pid
 
 echo "Brain PID: $BRAIN_PID"
 echo ""
