@@ -140,3 +140,7 @@ MNT_SPEED_SCALE     = 55.0
 # Maximum motor duty the trackball can command (keeps a speed ceiling)
 MNT_MAX_DUTY        = 3500
 
+# Degrees of servo movement per raw ball count in ARM mode
+# Higher = more responsive fine control, lower = finer precision
+MNT_ARM_SCALE       = 0.5
+

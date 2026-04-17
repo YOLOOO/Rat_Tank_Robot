@@ -161,6 +161,20 @@ class CommandReceiverServer:
                 logger.warning(f"Malformed MOTOR command: {command}")
                 return
 
+        # SERVO:channel:delta — validate structure and values
+        elif command.startswith("SERVO:"):
+            parts = command.split(":")
+            if len(parts) == 3:
+                try:
+                    int(parts[1])
+                    int(parts[2])
+                except ValueError:
+                    logger.warning(f"Malformed SERVO command: {command}")
+                    return
+            else:
+                logger.warning(f"Malformed SERVO command: {command}")
+                return
+
         elif command not in VALID_COMMANDS:
             logger.warning(f"Unknown command: {command}")
             return

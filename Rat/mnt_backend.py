@@ -3,17 +3,23 @@ MNT Reform Optical Trackball Backend (dev PC)
 =============================================
 Reads the MNT trackball via evdev and fires commands via callback.
 
-Drive model:
-    Y key (keyboard)        — toggle full-speed forward latch
-    U key (keyboard)        — toggle full-speed backward latch
-    Ball X axis             — differential steering: offsets left/right motor
-                              while a direction latch is active
-    Ball Y axis             — not used
+Two modes, toggled by BTN_MIDDLE:
 
-Arm / halt:
-    BTN_LEFT   (primary)    → ARM_TOGGLE
-    BTN_RIGHT  (secondary)  → GRIP_TOGGLE
-    BTN_MIDDLE              → HALT
+  DRIVE mode (default):
+    BTN_LEFT  held    → full-speed forward (hold to drive)
+    BTN_RIGHT held    → full-speed backward (hold to drive)
+    Ball X            → differential steering while a direction is held
+    Ball Y            → ignored
+
+  ARM mode:
+    BTN_LEFT  click   → ARM_TOGGLE
+    BTN_RIGHT click   → GRIP_TOGGLE
+    Ball X            → SERVO:1:delta  (grip fine adjust)
+    Ball Y            → SERVO:0:delta  (arm fine adjust)
+
+Both modes:
+    BTN_MIDDLE click  → toggle drive/arm mode (local, no robot command)
+    P key (keyboard)  → pause/resume all MNT output
 
 Install dependency on dev PC:
     pip install evdev
@@ -71,17 +77,20 @@ class MntMouseBackend:
         self._thread        = None
         self._running       = False
 
-        # Accumulated X delta between motor send ticks (Y ignored)
+        # Accumulated ball deltas between output ticks
         self._dx            = 0
+        self._dy            = 0
         self._axis_lock     = threading.Lock()
 
-        # Hold state for direction buttons
-        self._fwd_held      = False  # BTN_EXTRA — left extra
-        self._rev_held      = False  # BTN_SIDE  — right extra
+        # Drive mode held state
+        self._fwd_held      = False
+        self._rev_held      = False
 
-        # Motor send rate limiting
+        # Current mode: "drive" or "arm"
+        self._mode          = "drive"
+
+        # Output rate limiting
         self._send_interval = 1.0 / config.MNT_SEND_RATE
-        self._last_send     = 0.0
 
         # P-key toggle — when False no commands are forwarded to the robot
         self._enabled       = True
@@ -93,12 +102,12 @@ class MntMouseBackend:
         self._device = _find_device()
         if self._device is None:
             return False
-        self._running = True
-        self._thread  = threading.Thread(target=self._read_loop, daemon=True)
+        self._running    = True
+        self._thread     = threading.Thread(target=self._read_loop, daemon=True)
+        self._output_thread = threading.Thread(target=self._output_loop, daemon=True)
         self._thread.start()
-        self._motor_thread = threading.Thread(target=self._motor_loop, daemon=True)
-        self._motor_thread.start()
-        logger.info("MNT backend started")
+        self._output_thread.start()
+        logger.info("MNT backend started (DRIVE mode)")
         return True
 
     def stop(self):
@@ -118,13 +127,6 @@ class MntMouseBackend:
         state = "ENABLED" if self._enabled else "PAUSED"
         logger.info(f"MNT backend {state}")
 
-    def set_drive(self, fwd: bool, rev: bool):
-        """Set drive direction from polled key hold state (called at 50 Hz)."""
-        if not self._enabled:
-            fwd = rev = False
-        self._fwd_held = fwd and not rev
-        self._rev_held = rev and not fwd
-
     # ------------------------------------------------------------------
     # Background read loop
     # ------------------------------------------------------------------
@@ -139,65 +141,102 @@ class MntMouseBackend:
                     with self._axis_lock:
                         if event.code == ecodes.REL_X:
                             self._dx += event.value
-                        # REL_Y intentionally ignored
+                        elif event.code == ecodes.REL_Y:
+                            self._dy += event.value
 
-                elif event.type == ecodes.EV_KEY and event.value == 1 and self._enabled:
-                    cmd = self._map_button(event.code)
-                    if cmd:
-                        self._on_command(cmd)
+                elif event.type == ecodes.EV_KEY:
+                    self._handle_button(event.code, event.value)
 
         except Exception as e:
             if self._running:
                 logger.error(f"MNT read error: {e}")
 
-    def _map_button(self, code: int) -> Optional[str]:
-        if code == ecodes.BTN_LEFT:
-            return "ARM_TOGGLE"
-        elif code == ecodes.BTN_RIGHT:
-            return "GRIP_TOGGLE"
-        elif code == ecodes.BTN_MIDDLE:
-            return "HALT"
-        return None
+    def _handle_button(self, code: int, value: int):
+        # BTN_MIDDLE always toggles mode, regardless of enabled state
+        if code == ecodes.BTN_MIDDLE and value == 1:
+            self._toggle_mode()
+            return
+
+        if not self._enabled:
+            return
+
+        if self._mode == "drive":
+            if code == ecodes.BTN_LEFT:
+                self._fwd_held = (value == 1)
+            elif code == ecodes.BTN_RIGHT:
+                self._rev_held = (value == 1)
+
+        else:  # arm mode — fire on keydown only
+            if value != 1:
+                return
+            if code == ecodes.BTN_LEFT:
+                self._on_command("ARM_TOGGLE")
+            elif code == ecodes.BTN_RIGHT:
+                self._on_command("GRIP_TOGGLE")
+
+    def _toggle_mode(self):
+        self._mode     = "arm" if self._mode == "drive" else "drive"
+        self._fwd_held = False
+        self._rev_held = False
+        label = self._mode.upper()
+        logger.info(f"MNT mode: {label}")
+        print(f"  MNT mode: {label}")
 
     # ------------------------------------------------------------------
-    # Motor loop — rate limited, button-held base speed + X differential
+    # Output loop — rate limited, drives motors or servos depending on mode
     # ------------------------------------------------------------------
 
-    def _motor_loop(self):
+    def _output_loop(self):
         was_moving = False
 
         while self._running:
             time.sleep(self._send_interval)
 
             with self._axis_lock:
-                dx      = self._dx
+                dx       = self._dx
+                dy       = self._dy
                 self._dx = 0
-
-            if abs(dx) < config.MNT_DEADZONE:
-                dx = 0
+                self._dy = 0
 
             if not self._enabled:
                 was_moving = False
                 continue
 
-            # Base speed from held button — both buttons cancel out
-            if self._fwd_held and not self._rev_held:
-                base = config.MNT_MAX_DUTY
-            elif self._rev_held and not self._fwd_held:
-                base = -config.MNT_MAX_DUTY
+            if self._mode == "drive":
+                was_moving = self._tick_drive(dx, was_moving)
             else:
-                base = 0
-
-            if base == 0:
-                if was_moving:
-                    self._on_command("MOTOR:0:0")
+                self._tick_arm(dx, dy)
                 was_moving = False
-                continue
 
-            # Differential steering: X offsets one motor down
-            offset = int(dx * config.MNT_SPEED_SCALE)
-            left  = _clamp(base - offset, config.MNT_MAX_DUTY)
-            right = _clamp(base + offset, config.MNT_MAX_DUTY)
+    def _tick_drive(self, dx: int, was_moving: bool) -> bool:
+        if abs(dx) < config.MNT_DEADZONE:
+            dx = 0
 
-            self._on_command(f"MOTOR:{left}:{right}")
-            was_moving = True
+        if self._fwd_held and not self._rev_held:
+            base = config.MNT_MAX_DUTY
+        elif self._rev_held and not self._fwd_held:
+            base = -config.MNT_MAX_DUTY
+        else:
+            base = 0
+
+        if base == 0:
+            if was_moving:
+                self._on_command("MOTOR:0:0")
+            return False
+
+        offset = int(dx * config.MNT_SPEED_SCALE)
+        left   = _clamp(base - offset, config.MNT_MAX_DUTY)
+        right  = _clamp(base + offset, config.MNT_MAX_DUTY)
+        self._on_command(f"MOTOR:{left}:{right}")
+        return True
+
+    def _tick_arm(self, dx: int, dy: int):
+        # X → grip (servo ch1), Y → arm (servo ch0)
+        if abs(dx) >= config.MNT_DEADZONE:
+            scaled = int(dx * config.MNT_ARM_SCALE)
+            if scaled:
+                self._on_command(f"SERVO:1:{scaled}")
+        if abs(dy) >= config.MNT_DEADZONE:
+            scaled = int(dy * config.MNT_ARM_SCALE)
+            if scaled:
+                self._on_command(f"SERVO:0:{scaled}")
