@@ -57,42 +57,44 @@ def run(brain) -> bool:
         stop(brain)
         return False
 
-    command = brain.command_server.get_command(timeout=0)
+    # Drain all queued commands per tick — prevents backlog when sender rate
+    # exceeds brain tick rate (30 Hz sender vs 20 Hz brain)
+    while True:
+        command = brain.command_server.get_command(timeout=0)
+        if command is None:
+            break
 
-    if command is None:
-        return True
+        if command.startswith("MOTOR:"):
+            _handle_motor(command)
 
-    if command.startswith("MOTOR:"):
-        _handle_motor(command)
+        elif command == "ARM_TOGGLE":
+            servo = get_servo_controller()
+            if _arm_is_up:
+                servo.setServoPwm('0', _ARM_DOWN_ANGLE)
+                _arm_angle = float(_ARM_DOWN_ANGLE)
+                _arm_is_up = False
+                logger.debug("Arm down")
+            else:
+                servo.setServoPwm('0', _ARM_UP_ANGLE)
+                _arm_angle = float(_ARM_UP_ANGLE)
+                _arm_is_up = True
+                logger.debug("Arm up")
 
-    elif command == "ARM_TOGGLE":
-        servo = get_servo_controller()
-        if _arm_is_up:
-            servo.setServoPwm('0', _ARM_DOWN_ANGLE)
-            _arm_angle = float(_ARM_DOWN_ANGLE)
-            _arm_is_up = False
-            logger.debug("Arm down")
-        else:
-            servo.setServoPwm('0', _ARM_UP_ANGLE)
-            _arm_angle = float(_ARM_UP_ANGLE)
-            _arm_is_up = True
-            logger.debug("Arm up")
+        elif command == "GRIP_TOGGLE":
+            servo = get_servo_controller()
+            if _grip_is_open:
+                servo.setServoPwm('1', _GRIP_CLOSE_ANGLE)
+                _grip_angle = float(_GRIP_CLOSE_ANGLE)
+                _grip_is_open = False
+                logger.debug("Grip closed")
+            else:
+                servo.setServoPwm('1', _GRIP_OPEN_ANGLE)
+                _grip_angle = float(_GRIP_OPEN_ANGLE)
+                _grip_is_open = True
+                logger.debug("Grip open")
 
-    elif command == "GRIP_TOGGLE":
-        servo = get_servo_controller()
-        if _grip_is_open:
-            servo.setServoPwm('1', _GRIP_CLOSE_ANGLE)
-            _grip_angle = float(_GRIP_CLOSE_ANGLE)
-            _grip_is_open = False
-            logger.debug("Grip closed")
-        else:
-            servo.setServoPwm('1', _GRIP_OPEN_ANGLE)
-            _grip_angle = float(_GRIP_OPEN_ANGLE)
-            _grip_is_open = True
-            logger.debug("Grip open")
-
-    elif command.startswith("SERVO:"):
-        _handle_servo_fine(command)
+        elif command.startswith("SERVO:"):
+            _handle_servo_fine(command)
 
     return True
 

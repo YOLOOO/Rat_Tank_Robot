@@ -178,6 +178,10 @@ class MntMouseBackend:
         self._mode     = "arm" if self._mode == "drive" else "drive"
         self._fwd_held = False
         self._rev_held = False
+        # Discard any ball movement accumulated before the switch
+        with self._axis_lock:
+            self._dx = 0
+            self._dy = 0
         label = self._mode.upper()
         logger.info(f"MNT mode: {label}")
         print(f"  MNT mode: {label}")

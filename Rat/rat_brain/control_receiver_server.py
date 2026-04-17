@@ -183,9 +183,8 @@ class CommandReceiverServer:
             self.command_queue.put_nowait(command)
             logger.debug(f"Queued: {command}")
         except Full:
-            # For MOTOR commands during remote control, silently drop rather
-            # than log — at 30Hz drops are expected under load
-            if not command.startswith("MOTOR:"):
+            # MOTOR and SERVO are high-frequency streams — silently drop when full
+            if not command.startswith("MOTOR:") and not command.startswith("SERVO:"):
                 logger.warning(f"Queue full, dropping: {command}")
 
     def get_command(self, timeout: Optional[float] = None) -> Optional[str]:
