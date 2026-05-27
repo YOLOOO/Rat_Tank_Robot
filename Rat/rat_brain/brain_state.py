@@ -43,6 +43,7 @@ class RatBrain:
         self.selection_index = 0
         self.running_mission = None
         self.mission_start_time = None
+        self._error_since = None
 
         self.missions = {}
         self._load_missions()
@@ -229,7 +230,13 @@ class RatBrain:
 
             elif self.state == RobotState.ERROR:
                 self._set_led(config.LED_COLORS["error"])
-                time.sleep(0.3)
+                if self._error_since is None:
+                    self._error_since = time.time()
+                    logger.error("Entered ERROR state — auto-recovering in 5s")
+                elif time.time() - self._error_since > 5.0:
+                    logger.info("Recovering from ERROR state → IDLE")
+                    self._error_since = None
+                    self.state = RobotState.IDLE
 
         except Exception as e:
             logger.error(f"Brain update error: {e}")

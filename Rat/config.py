@@ -76,7 +76,10 @@ SERVO_CHANNEL_1 = 8   # GPIO 8 - servo 1 (e.g., tilt)
 SERVO_CHANNEL_2 = 25  # GPIO 25 - servo 2 (optional, reserved)
 SERVO_PWM_FREQ = 50   # Hz (standard servo frequency)
 
-# Channel-specific angle limits (if different)
+# Channel-specific angle limits.
+# CH0 (arm): MIN=150 is the DOWN position, MAX=70 is UP — physically inverted.
+# CH1 (grip): MIN=80 is OPEN, MAX=155 is CLOSED — normal direction.
+# All consumers use _servo_clamp() which handles MIN > MAX correctly.
 SERVO_CH0_MIN = 150
 SERVO_CH0_MAX = 70
 SERVO_CH1_MIN = 80

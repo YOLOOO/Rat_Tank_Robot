@@ -28,6 +28,8 @@ class Infrared:
             return 1 if self.IR02_sensor.value else 0
         elif channel == 3:
             return 1 if self.IR03_sensor.value else 0
+        else:
+            raise ValueError(f"Invalid infrared channel: {channel}")
 
     def read_all_infrared(self):
         return (self.read_one_infrared(1) << 2) | (self.read_one_infrared(2) << 1) | self.read_one_infrared(3)

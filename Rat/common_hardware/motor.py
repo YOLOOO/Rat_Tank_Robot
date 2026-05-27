@@ -101,4 +101,3 @@ def cleanup():
     _m2m.close()
 
 
-atexit.register(cleanup)

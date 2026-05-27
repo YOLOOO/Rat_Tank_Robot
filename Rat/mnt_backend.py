@@ -127,6 +127,9 @@ class MntMouseBackend:
         state = "ENABLED" if self._enabled else "PAUSED"
         logger.info(f"MNT backend {state}")
 
+    def is_enabled(self) -> bool:
+        return self._enabled
+
     # ------------------------------------------------------------------
     # Background read loop
     # ------------------------------------------------------------------

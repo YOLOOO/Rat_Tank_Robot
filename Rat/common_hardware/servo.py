@@ -108,13 +108,13 @@ class Servo:
         self.pi_version = PI_VERSION
 
         if self.pcb_version == 1 and self.pi_version == 1:
-            self.pwm = GpiozeroServo()  # Use GpiozeroServo for PCB version 1 and Raspberry Pi version 1
+            self.pwm = PigpioServo()
         elif self.pcb_version == 1 and self.pi_version == 2:
-            self.pwm = GpiozeroServo()  # Use GpiozeroServo for PCB version 1 and Raspberry Pi version 2
+            self.pwm = PigpioServo()
         elif self.pcb_version == 2 and self.pi_version == 1:
-            self.pwm = HardwareServo(1)  # Use HardwareServo for PCB version 2 and Raspberry Pi version 1
+            self.pwm = HardwareServo()
         elif self.pcb_version == 2 and self.pi_version == 2:
-            self.pwm = HardwareServo(2)  # Use HardwareServo for PCB version 2 and Raspberry Pi version 2
+            self.pwm = HardwareServo()
         self.pwm.setServoPwm("0", 90)  # Set initial angle for servo 0
         self.pwm.setServoPwm("1", 140)  # Set initial angle for servo 1
 

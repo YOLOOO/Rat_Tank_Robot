@@ -43,7 +43,7 @@ class lgpiod_ultrasonic:
             self.echo_pin = echo_pin
             try:
                 self.chip = lgpio.gpiochip_open(0)
-            except:
+            except Exception:
                 self.chip = lgpio.gpiochip_open(4)
             lgpio.gpio_claim_output(self.chip, self.trigger_pin)
             lgpio.gpio_claim_input(self.chip, self.echo_pin)
@@ -64,12 +64,12 @@ class lgpiod_ultrasonic:
 
             timeout = time.time() + 1.0
             start_time = time.time()
-            
+
             # Wait for echo to go high
             while lgpio.gpio_read(self.chip, self.echo_pin) == 0:
+                if time.time() > timeout:
+                    return -1
                 start_time = time.time()
-                if start_time > timeout:
-                    return -1  # Error code for timeout
 
             # Wait for echo to go low
             stop_time = time.time()

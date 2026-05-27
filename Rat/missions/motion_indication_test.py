@@ -102,18 +102,19 @@ def _run_servo_phase() -> bool:
         return False
 
     channel, start, end = moves[_step]
-    sweep_duration = abs(end - start) * _SERVO_STEP_DELAY + 0.2  # +margin
+    sweep_duration = abs(end - start) * _SERVO_STEP_DELAY
 
     elapsed = time.time() - _phase_start
 
-    if elapsed < sweep_duration:
-        step_range = range(start, end + 1) if start <= end else range(start, end - 1, -1)
-        for angle in step_range:
-            servo.setServoPwm(str(channel), angle)
-            time.sleep(_SERVO_STEP_DELAY)
+    if elapsed >= sweep_duration:
+        servo.setServoPwm(str(channel), end)
         logger.debug(f"Servo {channel}: {start}°→{end}°")
         _step       += 1
         _phase_start = time.time()
+    else:
+        progress = elapsed / sweep_duration if sweep_duration > 0 else 1.0
+        angle    = int(start + (end - start) * progress)
+        servo.setServoPwm(str(channel), angle)
 
     return True
 

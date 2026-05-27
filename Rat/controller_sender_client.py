@@ -197,7 +197,7 @@ class RobotController:
         if command == "MNT_TOGGLE":
             if self._mnt is not None:
                 self._mnt.toggle_enabled()
-                state = "ENABLED" if self._mnt._enabled else "PAUSED"
+                state = "ENABLED" if self._mnt.is_enabled() else "PAUSED"
                 print(f"  Trackball {state}")
             return
         self.connection.ensure_connected()

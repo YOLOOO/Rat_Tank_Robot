@@ -59,7 +59,7 @@ class Camera:
 
     def get_frame(self):
         with self.streaming_output.condition:
-            self.streaming_output.condition.wait()  # Wait for a new frame to be available
+            self.streaming_output.condition.wait(timeout=1.0)
             return self.streaming_output.frame      # Return the current frame
 
     def save_video(self, filename, duration=10):

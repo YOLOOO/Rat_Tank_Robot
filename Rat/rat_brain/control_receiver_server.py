@@ -138,6 +138,20 @@ class CommandReceiverServer:
     # Command handling
     # ------------------------------------------------------------------
 
+    def _validate_two_int_command(self, command: str) -> bool:
+        """Return True if command has the form PREFIX:int:int."""
+        parts = command.split(":")
+        if len(parts) != 3:
+            logger.warning(f"Malformed command: {command}")
+            return False
+        try:
+            int(parts[1])
+            int(parts[2])
+            return True
+        except ValueError:
+            logger.warning(f"Malformed command: {command}")
+            return False
+
     def _process_command(self, command: str):
         command = command.strip().upper()
 
@@ -147,32 +161,8 @@ class CommandReceiverServer:
             logger.warning("HALT received")
             return
 
-        # MOTOR:left:right — validate structure and values
-        if command.startswith("MOTOR:"):
-            parts = command.split(":")
-            if len(parts) == 3:
-                try:
-                    int(parts[1])
-                    int(parts[2])
-                except ValueError:
-                    logger.warning(f"Malformed MOTOR command: {command}")
-                    return
-            else:
-                logger.warning(f"Malformed MOTOR command: {command}")
-                return
-
-        # SERVO:channel:delta — validate structure and values
-        elif command.startswith("SERVO:"):
-            parts = command.split(":")
-            if len(parts) == 3:
-                try:
-                    int(parts[1])
-                    int(parts[2])
-                except ValueError:
-                    logger.warning(f"Malformed SERVO command: {command}")
-                    return
-            else:
-                logger.warning(f"Malformed SERVO command: {command}")
+        if command.startswith("MOTOR:") or command.startswith("SERVO:"):
+            if not self._validate_two_int_command(command):
                 return
 
         elif command not in VALID_COMMANDS:

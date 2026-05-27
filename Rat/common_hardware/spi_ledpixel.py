@@ -60,7 +60,8 @@ class Freenove_SPI_LedPixel(object):
             print("SPI6-MOSI: GPIO20(WS2812-PIN)  SPI6-MISO: GPIO19  SPI6-SCLK: GPIO21  SPI6-CE0: GPIO18  SPI6-CE1: GPIO27")
     
     def led_close(self):
-        # Turn off all LEDs and close the SPI connection
+        if self.led_init_state == 0:
+            return
         self.set_all_led_rgb([0, 0, 0])
         self.spi.close()
     
