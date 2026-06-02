@@ -138,7 +138,7 @@ MNT_DEADZONE        = 2
 
 # Multiplier applied to raw ball delta before mapping to motor duty
 # Higher = more responsive, lower = easier fine control
-MNT_SPEED_SCALE     = 55.0
+MNT_SPEED_SCALE     = 200.0
 
 # Maximum motor duty the trackball can command (keeps a speed ceiling)
 MNT_MAX_DUTY        = 3500

@@ -14,8 +14,8 @@ Two modes, toggled by BTN_MIDDLE:
   ARM mode:
     BTN_LEFT  click   → ARM_TOGGLE
     BTN_RIGHT click   → GRIP_TOGGLE
-    Ball X            → SERVO:1:delta  (grip fine adjust)
-    Ball Y            → SERVO:0:delta  (arm fine adjust)
+    Ball X            → SERVO:0:delta  (arm fine adjust)
+    Ball Y            → SERVO:1:delta  (grip fine adjust)
 
 Both modes:
     BTN_MIDDLE click  → toggle drive/arm mode (local, no robot command)
@@ -227,7 +227,7 @@ class MntMouseBackend:
             return True
         elif dx != 0:
             spin = _clamp(int(dx * config.MNT_SPEED_SCALE), config.MNT_MAX_DUTY)
-            self._on_command(f"MOTOR:{spin}:{-spin}")
+            self._on_command(f"MOTOR:{-spin}:{spin}")
             return True
         else:
             if was_moving:
@@ -235,12 +235,12 @@ class MntMouseBackend:
             return False
 
     def _tick_arm(self, dx: int, dy: int):
-        # X → grip (servo ch1), Y → arm (servo ch0)
+        # X → arm (servo ch0), Y → grip (servo ch1)
         if abs(dx) >= config.MNT_DEADZONE:
             scaled = int(dx * config.MNT_ARM_SCALE)
             if scaled:
-                self._on_command(f"SERVO:1:{scaled}")
+                self._on_command(f"SERVO:0:{scaled}")
         if abs(dy) >= config.MNT_DEADZONE:
             scaled = int(dy * config.MNT_ARM_SCALE)
             if scaled:
-                self._on_command(f"SERVO:0:{scaled}")
+                self._on_command(f"SERVO:1:{scaled}")
