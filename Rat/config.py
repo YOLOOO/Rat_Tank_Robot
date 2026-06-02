@@ -143,6 +143,9 @@ MNT_SPEED_SCALE     = 200.0
 # Maximum motor duty the trackball can command (keeps a speed ceiling)
 MNT_MAX_DUTY        = 3500
 
+# How long (seconds) to keep spinning after the ball stops moving
+MNT_SPIN_COAST      = 0.3
+
 # Degrees of servo movement per raw ball count in ARM mode
 # Higher = more responsive fine control, lower = finer precision
 MNT_ARM_SCALE       = 0.5

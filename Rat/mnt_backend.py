@@ -86,6 +86,10 @@ class MntMouseBackend:
         self._fwd_held      = False
         self._rev_held      = False
 
+        # Spin coast — keep last spin going briefly after ball stops
+        self._last_spin     = 0
+        self._spin_until    = 0.0
+
         # Current mode: "drive" or "arm"
         self._mode          = "drive"
 
@@ -220,14 +224,21 @@ class MntMouseBackend:
             dx = 0
 
         if self._fwd_held and not self._rev_held:
+            self._spin_until = 0.0
             self._on_command(f"MOTOR:{config.MNT_MAX_DUTY}:{config.MNT_MAX_DUTY}")
             return True
         elif self._rev_held and not self._fwd_held:
+            self._spin_until = 0.0
             self._on_command(f"MOTOR:{-config.MNT_MAX_DUTY}:{-config.MNT_MAX_DUTY}")
             return True
         elif dx != 0:
             spin = _clamp(int(dx * config.MNT_SPEED_SCALE), config.MNT_MAX_DUTY)
+            self._last_spin  = spin
+            self._spin_until = time.time() + config.MNT_SPIN_COAST
             self._on_command(f"MOTOR:{-spin}:{spin}")
+            return True
+        elif time.time() < self._spin_until:
+            self._on_command(f"MOTOR:{-self._last_spin}:{self._last_spin}")
             return True
         else:
             if was_moving:
