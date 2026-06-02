@@ -19,10 +19,10 @@ Controls (keyboard):
     Q - QUIT
 
 Controls (MNT trackball):
-    Ball X        → differential steering while driving
-    Left button   → ARM toggle
-    Right button  → GRIP toggle
-    Middle button → HALT
+    Ball X        → turn in place left / right
+    Right button  → full-speed forward (hold to drive)
+    Left button   → full-speed backward (hold to drive)
+    Middle button → toggle drive/arm mode
 """
 
 import sys

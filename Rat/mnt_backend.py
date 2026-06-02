@@ -6,9 +6,9 @@ Reads the MNT trackball via evdev and fires commands via callback.
 Two modes, toggled by BTN_MIDDLE:
 
   DRIVE mode (default):
-    BTN_LEFT  held    → full-speed forward (hold to drive)
-    BTN_RIGHT held    → full-speed backward (hold to drive)
-    Ball X            → differential steering while a direction is held
+    BTN_RIGHT held    → full-speed forward (hold to drive)
+    BTN_LEFT  held    → full-speed backward (hold to drive)
+    Ball X            → turn in place left / right (independent of direction buttons)
     Ball Y            → ignored
 
   ARM mode:
@@ -164,9 +164,9 @@ class MntMouseBackend:
             return
 
         if self._mode == "drive":
-            if code == ecodes.BTN_LEFT:
+            if code == ecodes.BTN_RIGHT:
                 self._fwd_held = (value == 1)
-            elif code == ecodes.BTN_RIGHT:
+            elif code == ecodes.BTN_LEFT:
                 self._rev_held = (value == 1)
 
         else:  # arm mode — fire on keydown only
@@ -220,22 +220,19 @@ class MntMouseBackend:
             dx = 0
 
         if self._fwd_held and not self._rev_held:
-            base = config.MNT_MAX_DUTY
+            self._on_command(f"MOTOR:{config.MNT_MAX_DUTY}:{config.MNT_MAX_DUTY}")
+            return True
         elif self._rev_held and not self._fwd_held:
-            base = -config.MNT_MAX_DUTY
+            self._on_command(f"MOTOR:{-config.MNT_MAX_DUTY}:{-config.MNT_MAX_DUTY}")
+            return True
+        elif dx != 0:
+            spin = _clamp(int(dx * config.MNT_SPEED_SCALE), config.MNT_MAX_DUTY)
+            self._on_command(f"MOTOR:{spin}:{-spin}")
+            return True
         else:
-            base = 0
-
-        if base == 0:
             if was_moving:
                 self._on_command("MOTOR:0:0")
             return False
-
-        offset = int(dx * config.MNT_SPEED_SCALE)
-        left   = _clamp(base - offset, config.MNT_MAX_DUTY)
-        right  = _clamp(base + offset, config.MNT_MAX_DUTY)
-        self._on_command(f"MOTOR:{left}:{right}")
-        return True
 
     def _tick_arm(self, dx: int, dy: int):
         # X → grip (servo ch1), Y → arm (servo ch0)
