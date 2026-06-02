@@ -15,8 +15,6 @@ Controls (keyboard):
     D - RIGHT
     S - SELECT
     H - HALT
-    Y - FORWARD
-    U - BACKWARD
     P - PAUSE / RESUME trackball (local toggle, not sent to robot)
     Q - QUIT
 
@@ -48,13 +46,14 @@ else:
     import tty
     import termios
 
-CMD_LEFT     = "LEFT"
-CMD_RIGHT    = "RIGHT"
-CMD_SELECT   = "SELECT"
-CMD_HALT     = "HALT"
-CMD_QUIT     = "QUIT"
-CMD_FORWARD  = f"MOTOR:{config.MNT_MAX_DUTY}:{config.MNT_MAX_DUTY}"
-CMD_BACKWARD = f"MOTOR:{-config.MNT_MAX_DUTY}:{-config.MNT_MAX_DUTY}"
+CMD_LEFT   = "LEFT"
+CMD_RIGHT  = "RIGHT"
+CMD_SELECT = "SELECT"
+CMD_HALT   = "HALT"
+CMD_QUIT   = "QUIT"
+
+# Missions that require the MNT trackball to be active
+TRACKBALL_ONLY_MISSIONS = {"REMOTE_CONTROL"}
 
 
 # ------------------------------------------------------------------
@@ -132,8 +131,6 @@ class KeyboardBackend:
         'h': CMD_HALT,
         'q': CMD_QUIT,
         'p': "MNT_TOGGLE",
-        'y': CMD_FORWARD,
-        'u': CMD_BACKWARD,
     }
 
     def __init__(self, on_command):
@@ -188,18 +185,34 @@ class RobotController:
         self.connection  = RobotConnection()
         self._quit_event = threading.Event()
         self._mnt        = None  # set in run() once backend is created
+        self._mnt_active = False
+        self._menu       = sorted(config.MISSIONS.keys(), key=lambda n: config.MISSIONS[n][2])
+        self._idx        = 0
 
     def _on_command(self, command: str):
         if command == CMD_QUIT:
             print("\nQuitting...")
             self._quit_event.set()
             return
+
         if command == "MNT_TOGGLE":
             if self._mnt is not None:
                 self._mnt.toggle_enabled()
                 state = "ENABLED" if self._mnt.is_enabled() else "PAUSED"
                 print(f"  Trackball {state}")
             return
+
+        # Track menu index to mirror brain state
+        if command == CMD_LEFT:
+            self._idx = (self._idx - 1) % len(self._menu)
+        elif command == CMD_RIGHT:
+            self._idx = (self._idx + 1) % len(self._menu)
+        elif command == CMD_SELECT:
+            selected = self._menu[self._idx]
+            if selected in TRACKBALL_ONLY_MISSIONS and not self._mnt_active:
+                print(f"  {selected} requires MNT trackball — not available")
+                return
+
         self.connection.ensure_connected()
         self.connection.send(command)
         if command == CMD_HALT:
@@ -211,7 +224,6 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
-        print("  Y - FORWARD           U - BACKWARD")
         print("  P - PAUSE/RESUME trackball")
         print("  Q - QUIT")
         print("  Trackball active if plugged in")
@@ -226,9 +238,9 @@ class RobotController:
         keyboard.start()
 
         # Start MNT backend if available
-        self._mnt  = MntMouseBackend(on_command=self._on_command)
-        mnt_active = self._mnt.start()
-        if mnt_active:
+        self._mnt        = MntMouseBackend(on_command=self._on_command)
+        self._mnt_active = self._mnt.start()
+        if self._mnt_active:
             logger.info("MNT trackball active")
         else:
             logger.info("MNT trackball not found — keyboard only")
@@ -239,7 +251,7 @@ class RobotController:
             print("\nInterrupted")
         finally:
             keyboard.stop()
-            if mnt_active:
+            if self._mnt_active:
                 self._mnt.stop()
             self.connection.disconnect()
             print("Controller stopped.")
