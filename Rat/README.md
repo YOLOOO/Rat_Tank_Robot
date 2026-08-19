@@ -16,34 +16,46 @@ This starts the brain server. You should see:
 - TCP server listening on `0.0.0.0:5577`
 - LEDs lit with the selected mission color
 
-### On DEV PC
+### On DEV PC (Windows)
 
-```bash
+```powershell
 cd Rat/
-python3 controller_sender_client.py --host <ROBOT_IP>
+pip install -r requirements-dev.txt
+python controller_sender_client.py --host <ROBOT_IP>
 ```
 
-Controls:
+Both the keyboard and the Steam Controller are read in the same process — no separate script to launch. For the Steam Controller to be detected, connect it via its wireless dongle ("the puck") and make sure Steam is running with **Xbox Configuration Support** enabled (Steam > Big Picture > Controller Settings), so Windows sees it as a standard XInput gamepad.
+
+Controls (keyboard):
 - **A** - LEFT (previous mission)
 - **D** - RIGHT (next mission)
 - **S** - SELECT (run mission)
 - **H** - HALT (stop everything immediately)
-- **P** - Pause / resume trackball output
+- **P** - Pause / resume Steam Controller output
 - **Q** - QUIT
 
-Or use the MNT trackball backend:
+Controls (Steam Controller) — full mapping in [steam_controller_backend.py](steam_controller_backend.py):
+- **Left stick Y / Right stick Y** - left / right track speed (DRIVE mode)
+- **A / B** - SELECT / HALT
+- **X / Y** - ARM_TOGGLE / GRIP_TOGGLE
+- **D-Pad Left / Right** - LEFT / RIGHT (menu navigate)
+- **Back** - QUIT
+- **Start** - Pause / resume controller output
+- **L3 (left stick click)** - toggle DRIVE / ARM mode (sticks then fine-adjust arm/grip servos)
 
-```bash
-python3 mnt_backend.py --host <ROBOT_IP>
+To verify the controller is detected and tune axis deadzone, run:
+
+```powershell
+python tools/probe_steam_controller.py
 ```
 
 ## System Architecture
 
 ```
-[Keyboard / MNT Trackball on DEV PC]
+[Keyboard / Steam Controller on DEV PC]
            ↓
    controller_sender_client.py
-   mnt_backend.py
+   steam_controller_backend.py
            ↓ (TCP: commands)
   control_receiver_server.py (Robot Pi)
            ↓
@@ -65,9 +77,10 @@ python3 mnt_backend.py --host <ROBOT_IP>
 ```
 Rat/
 ├── config.py                    # Central configuration
-├── controller_sender_client.py  # DEV PC client (keyboard input)
-├── mnt_backend.py               # DEV PC client (MNT trackball input)
-├── requirements.txt
+├── controller_sender_client.py  # DEV PC client (keyboard + Steam Controller input)
+├── steam_controller_backend.py  # DEV PC client (Steam Controller input)
+├── requirements.txt              # Robot (Raspberry Pi) dependencies
+├── requirements-dev.txt          # Dev PC (Windows) dependencies
 ├── start_rat.sh                 # Start script
 ├── stop_rat.sh                  # Stop script
 │
@@ -104,7 +117,7 @@ Rat/
 │   └── camera.py                # Camera
 │
 ├── tools/                       # Dev utilities
-│   ├── probe_mnt.py             # Inspect MNT trackball events
+│   ├── probe_steam_controller.py  # Inspect Steam Controller axes/buttons
 │   └── servo_calibrate.py       # Interactive servo calibration
 │
 └── lib_utils/                   # Vendored libraries
@@ -119,7 +132,7 @@ Edit `config.py` to:
 - Set LED colors and timings
 - Configure motor and servo pins
 - Adjust motor speeds and turn calibration
-- Configure MNT trackball parameters
+- Configure Steam Controller parameters (poll rate, deadzone, speed scale)
 
 ## Local Dependencies
 
@@ -282,7 +295,7 @@ All hardware calls go through the abstraction layer in `common_hardware/`, enabl
 
 ## Future Phases
 
-- [x] MNT trackball input (`mnt_backend.py`)
+- [x] Steam Controller input (`steam_controller_backend.py`)
 - [ ] Emergency stop button (pin reserved: GPIO26)
 - [ ] Non-blocking mission execution (`camera_test.py` still blocks the brain tick)
 - [ ] Mission chaining

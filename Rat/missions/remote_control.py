@@ -1,7 +1,7 @@
 """
 missions/remote_control.py
 
-Puts the robot under direct remote control via the MNT trackball.
+Puts the robot under direct remote control via the Steam Controller.
 
 Expects commands from the queue:
     MOTOR:left:right   — set motor speeds directly (-4095..+4095)

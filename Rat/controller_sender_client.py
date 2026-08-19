@@ -6,23 +6,24 @@ Robot IP and port come from config.py — just run with no arguments:
     python controller_sender_client.py
 
 Both input backends run simultaneously in the same process:
-    KeyboardBackend  — always active, menu navigation + HALT + quit
-    MntMouseBackend  — always active if trackball is plugged in,
-                       drives motors and arm during remote_control mission
+    KeyboardBackend        — always active, menu navigation + HALT + quit
+    SteamControllerBackend — always active if the Steam Controller is
+                             connected, drives motors and arm during
+                             the remote_control mission
 
 Controls (keyboard):
     A - LEFT
     D - RIGHT
     S - SELECT
     H - HALT
-    P - PAUSE / RESUME trackball (local toggle, not sent to robot)
+    P - PAUSE / RESUME controller output (local toggle, not sent to robot)
     Q - QUIT
 
-Controls (MNT trackball):
-    Ball X        → turn in place left / right
-    Right button  → full-speed forward (hold to drive)
-    Left button   → full-speed backward (hold to drive)
-    Middle button → toggle drive/arm mode
+Controls (Steam Controller — see steam_controller_backend.py for the full mapping):
+    Left stick Y  / Right stick Y → left / right track speed (DRIVE mode)
+    A / B                         → SELECT / HALT
+    X / Y                         → ARM_TOGGLE / GRIP_TOGGLE
+    L3 (left stick click)         → toggle DRIVE / ARM mode
 """
 
 import sys
@@ -32,7 +33,7 @@ import threading
 import platform
 
 import config
-from mnt_backend import MntMouseBackend
+from steam_controller_backend import SteamControllerBackend
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -52,8 +53,8 @@ CMD_SELECT = "SELECT"
 CMD_HALT   = "HALT"
 CMD_QUIT   = "QUIT"
 
-# Missions that require the MNT trackball to be active
-TRACKBALL_ONLY_MISSIONS = {"REMOTE_CONTROL"}
+# Missions that require the Steam Controller to be active
+CONTROLLER_ONLY_MISSIONS = {"REMOTE_CONTROL"}
 
 
 # ------------------------------------------------------------------
@@ -130,7 +131,7 @@ class KeyboardBackend:
         's': CMD_SELECT,
         'h': CMD_HALT,
         'q': CMD_QUIT,
-        'p': "MNT_TOGGLE",
+        'p': "STEAM_TOGGLE",
     }
 
     def __init__(self, on_command):
@@ -176,18 +177,18 @@ class KeyboardBackend:
 
 class RobotController:
     """
-    Runs keyboard and MNT backends simultaneously.
+    Runs keyboard and Steam Controller backends simultaneously.
     Both feed into the same TCP connection.
     Keyboard Q shuts everything down cleanly.
     """
 
     def __init__(self):
-        self.connection  = RobotConnection()
-        self._quit_event = threading.Event()
-        self._mnt        = None  # set in run() once backend is created
-        self._mnt_active = False
-        self._menu       = sorted(config.MISSIONS.keys(), key=lambda n: config.MISSIONS[n][2])
-        self._idx        = 0
+        self.connection    = RobotConnection()
+        self._quit_event   = threading.Event()
+        self._steam        = None  # set in run() once backend is created
+        self._steam_active = False
+        self._menu         = sorted(config.MISSIONS.keys(), key=lambda n: config.MISSIONS[n][2])
+        self._idx          = 0
 
     def _on_command(self, command: str):
         if command == CMD_QUIT:
@@ -195,11 +196,11 @@ class RobotController:
             self._quit_event.set()
             return
 
-        if command == "MNT_TOGGLE":
-            if self._mnt is not None:
-                self._mnt.toggle_enabled()
-                state = "ENABLED" if self._mnt.is_enabled() else "PAUSED"
-                print(f"  Trackball {state}")
+        if command == "STEAM_TOGGLE":
+            if self._steam is not None:
+                self._steam.toggle_enabled()
+                state = "ENABLED" if self._steam.is_enabled() else "PAUSED"
+                print(f"  Controller {state}")
             return
 
         # Track menu index to mirror brain state
@@ -209,8 +210,8 @@ class RobotController:
             self._idx = (self._idx + 1) % len(self._menu)
         elif command == CMD_SELECT:
             selected = self._menu[self._idx]
-            if selected in TRACKBALL_ONLY_MISSIONS and not self._mnt_active:
-                print(f"  {selected} requires MNT trackball — not available")
+            if selected in CONTROLLER_ONLY_MISSIONS and not self._steam_active:
+                print(f"  {selected} requires Steam Controller — not available")
                 return
 
         self.connection.ensure_connected()
@@ -224,9 +225,9 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
-        print("  P - PAUSE/RESUME trackball")
+        print("  P - PAUSE/RESUME Steam Controller")
         print("  Q - QUIT")
-        print("  Trackball active if plugged in")
+        print("  Steam Controller active if connected")
         print("=" * 50 + "\n")
 
         if not self.connection.connect():
@@ -237,13 +238,13 @@ class RobotController:
         keyboard = KeyboardBackend(on_command=self._on_command)
         keyboard.start()
 
-        # Start MNT backend if available
-        self._mnt        = MntMouseBackend(on_command=self._on_command)
-        self._mnt_active = self._mnt.start()
-        if self._mnt_active:
-            logger.info("MNT trackball active")
+        # Start Steam Controller backend if available
+        self._steam        = SteamControllerBackend(on_command=self._on_command)
+        self._steam_active = self._steam.start()
+        if self._steam_active:
+            logger.info("Steam Controller active")
         else:
-            logger.info("MNT trackball not found — keyboard only")
+            logger.info("Steam Controller not found — keyboard only")
 
         try:
             self._quit_event.wait()  # Block until Q is pressed
@@ -251,8 +252,8 @@ class RobotController:
             print("\nInterrupted")
         finally:
             keyboard.stop()
-            if self._mnt_active:
-                self._mnt.stop()
+            if self._steam_active:
+                self._steam.stop()
             self.connection.disconnect()
             print("Controller stopped.")
 

@@ -1,0 +1,8 @@
+# RAT BRAIN Dev PC Requirements
+# Install on the DEV PC (Windows) with: pip install -r requirements-dev.txt
+#
+# This is separate from requirements.txt, which lists dependencies for the
+# robot itself (Raspberry Pi) and is not needed on the dev PC.
+
+# Steam Controller / gamepad input (controller_sender_client.py)
+pygame>=2.1.0

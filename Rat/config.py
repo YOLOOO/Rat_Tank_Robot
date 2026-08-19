@@ -22,7 +22,7 @@ MAX_COMMAND_QUEUE_SIZE = 100
 MISSIONS = {
     "MOTION_TEST":    ("missions.motion_indication_test", (255, 0,   0),   1),  # Red     - LED/servo/motor test
     "SENSORY_TEST":   ("missions.sensory_test",           (0,   255, 0),   2),  # Green   - sensor readout test
-    "REMOTE_CONTROL": ("missions.remote_control",         (0,   0,   255), 3),  # Blue    - trackball control
+    "REMOTE_CONTROL": ("missions.remote_control",         (0,   0,   255), 3),  # Blue    - controller control
     "CAMERA_TEST":    ("missions.camera_test",            (255, 0,   255), 4),  # Magenta - camera test
 }
 
@@ -125,28 +125,17 @@ CAMERA_STREAM_PORT = 8888
 CAMERA_STREAM_HOST = "0.0.0.0"
 
 # ============================================================================
-# MNT TRACKBALL CONTROLLER  (dev PC side)
+# STEAM CONTROLLER  (dev PC side)
 # ============================================================================
-# evdev device name to match — run `python -m evdev.evtest` to find yours
-MNT_DEVICE_NAME     = "MNT Research Reform Trackball (RP2040)"
+# How many times per second to poll the controller and send MOTOR/SERVO commands
+STEAM_POLL_RATE     = 30   # Hz
 
-# How many MOTOR commands to send per second (avoids flooding the TCP connection)
-MNT_SEND_RATE       = 30   # Hz
+# Ignore stick deflection below this magnitude (0.0-1.0) — reduces drift/jitter
+STEAM_DEADZONE      = 0.15
 
-# Ignore ball movement below this raw delta (reduces jitter when ball is still)
-MNT_DEADZONE        = 2
+# Maximum motor duty a full stick deflection commands
+STEAM_MAX_DUTY      = 3500
 
-# Multiplier applied to raw ball delta before mapping to motor duty
-# Higher = more responsive, lower = easier fine control
-MNT_SPEED_SCALE     = 200.0
-
-# Maximum motor duty the trackball can command (keeps a speed ceiling)
-MNT_MAX_DUTY        = 3500
-
-# How long (seconds) to keep spinning after the ball stops moving
-MNT_SPIN_COAST      = 0.3
-
-# Degrees of servo movement per raw ball count in ARM mode
-# Higher = more responsive fine control, lower = finer precision
-MNT_ARM_SCALE       = 0.5
+# Degrees of servo movement per tick at full stick deflection in ARM mode
+STEAM_ARM_SCALE     = 3.0
 
