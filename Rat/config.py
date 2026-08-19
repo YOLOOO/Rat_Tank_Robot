@@ -125,17 +125,8 @@ CAMERA_STREAM_PORT = 8888
 CAMERA_STREAM_HOST = "0.0.0.0"
 
 # ============================================================================
-# STEAM CONTROLLER  (dev PC side)
+# KEYBOARD REMOTE DRIVE  (dev PC side)
 # ============================================================================
-# How many times per second to poll the controller and send MOTOR/SERVO commands
-STEAM_POLL_RATE     = 30   # Hz
-
-# Ignore stick deflection below this magnitude (0.0-1.0) — reduces drift/jitter
-STEAM_DEADZONE      = 0.15
-
-# Maximum motor duty a full stick deflection commands
-STEAM_MAX_DUTY      = 3500
-
-# Degrees of servo movement per tick at full stick deflection in ARM mode
-STEAM_ARM_SCALE     = 3.0
+# Motor duty used for W/A/S/D drive commands in controller_sender_client.py
+KEYBOARD_DRIVE_SPEED = MOTOR_SPEED_FAST
 

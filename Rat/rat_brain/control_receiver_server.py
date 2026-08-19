@@ -10,6 +10,7 @@ so it can never be blocked by a full queue or slow brain loop.
 
 import socket
 import threading
+import time
 import logging
 from queue import Queue, Full
 from typing import Optional
@@ -24,6 +25,13 @@ VALID_COMMANDS = {
     "ARM_TOGGLE", "GRIP_TOGGLE",
     # MOTOR:left:right is validated separately due to dynamic values
 }
+
+# How long a connected client can go without sending anything before the
+# server gives up on it and frees the slot for a new connection. Without
+# this, a connection that dies without a clean TCP close (WiFi drop, NAT/
+# router hiccup, laptop sleep) never triggers recv()'s "disconnected" path —
+# it just keeps timing out and looping forever.
+CLIENT_IDLE_TIMEOUT = 15.0
 
 
 class CommandReceiverServer:
@@ -77,16 +85,39 @@ class CommandReceiverServer:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(1)
+            self.server_socket.listen(2)
             self.server_socket.settimeout(1.0)
             logger.info(f"Listening on {self.host}:{self.port}")
 
             while self.running:
                 try:
                     client_socket, addr = self.server_socket.accept()
-                    self.client_socket = client_socket
                     logger.info(f"Client connected: {addr}")
-                    self._handle_client(client_socket, addr)
+
+                    # Only one controller is authoritative at a time. If a
+                    # previous connection is still around — most likely a
+                    # zombie that never sent a clean disconnect — evict it
+                    # immediately instead of leaving two sockets alive.
+                    old_socket = self.client_socket
+                    self.client_socket = client_socket
+                    if old_socket is not None:
+                        try:
+                            old_socket.close()
+                        except Exception:
+                            pass
+
+                    # Handled on its own thread so a stuck/zombie client can
+                    # never block this loop from accepting the next
+                    # connection — previously accept() wasn't reached again
+                    # until the current client fully timed out or errored,
+                    # which a connection that dies without a clean TCP close
+                    # (WiFi drop, NAT hiccup, sleep/wake) never triggers.
+                    threading.Thread(
+                        target=self._handle_client,
+                        args=(client_socket, addr),
+                        daemon=True,
+                    ).start()
+
                 except socket.timeout:
                     continue
                 except OSError as e:
@@ -102,16 +133,18 @@ class CommandReceiverServer:
             self.stop()
 
     def _handle_client(self, client_socket: socket.socket, addr: tuple):
-        buffer = ""
+        buffer     = ""
+        last_data  = time.time()
         try:
             client_socket.settimeout(0.5)
-            while self.running:
+            while self.running and self.client_socket is client_socket:
                 try:
                     data = client_socket.recv(1024).decode("utf-8")
                     if not data:
                         logger.info(f"Client {addr} disconnected")
                         break
 
+                    last_data = time.time()
                     buffer += data
                     lines  = buffer.split("\n")
                     buffer = lines[-1]
@@ -122,6 +155,9 @@ class CommandReceiverServer:
                             self._process_command(command)
 
                 except socket.timeout:
+                    if time.time() - last_data > CLIENT_IDLE_TIMEOUT:
+                        logger.warning(f"Client {addr} idle for {CLIENT_IDLE_TIMEOUT}s — dropping")
+                        break
                     continue
                 except Exception as e:
                     logger.error(f"Client read error: {e}")
@@ -131,7 +167,10 @@ class CommandReceiverServer:
                 client_socket.close()
             except Exception:
                 pass
-            self.client_socket = None
+            # Don't clobber a newer connection's slot if we were already
+            # evicted by _run_server before this thread noticed.
+            if self.client_socket is client_socket:
+                self.client_socket = None
             logger.info(f"Client {addr} closed")
 
     # ------------------------------------------------------------------

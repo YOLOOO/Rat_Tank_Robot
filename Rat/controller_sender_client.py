@@ -5,25 +5,29 @@ Sends commands to the robot via TCP.
 Robot IP and port come from config.py — just run with no arguments:
     python controller_sender_client.py
 
-Both input backends run simultaneously in the same process:
-    KeyboardBackend        — always active, menu navigation + HALT + quit
-    SteamControllerBackend — always active if the Steam Controller is
-                             connected, drives motors and arm during
-                             the remote_control mission
+Keyboard-only. Two modes, both read from the same keys:
 
-Controls (keyboard):
+Menu mode (default):
     A - LEFT
     D - RIGHT
-    S - SELECT
+    S - SELECT (selecting REMOTE_CONTROL switches to drive mode)
     H - HALT
-    P - PAUSE / RESUME controller output (local toggle, not sent to robot)
     Q - QUIT
 
-Controls (Steam Controller — see steam_controller_backend.py for the full mapping):
-    Left stick Y  / Right stick Y → left / right track speed (DRIVE mode)
-    A / B                         → SELECT / HALT
-    X / Y                         → ARM_TOGGLE / GRIP_TOGGLE
-    L3 (left stick click)         → toggle DRIVE / ARM mode
+Drive mode (after selecting REMOTE_CONTROL):
+    W - forward
+    S - backward
+    A - spin left
+    D - spin right
+    SPACE - stop moving (stays in drive mode)
+    R - ARM_TOGGLE (raise/lower)
+    G - GRIP_TOGGLE (open/close)
+    H - HALT (stops the robot and returns to menu mode)
+    Q - QUIT
+
+Held-key driving isn't possible here — Windows console key reads are
+discrete presses, not press/release events — so each tap sets the motors
+to a fixed state until the next tap changes it.
 """
 
 import sys
@@ -31,9 +35,9 @@ import socket
 import logging
 import threading
 import platform
+import time
 
 import config
-from steam_controller_backend import SteamControllerBackend
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -53,8 +57,27 @@ CMD_SELECT = "SELECT"
 CMD_HALT   = "HALT"
 CMD_QUIT   = "QUIT"
 
-# Missions that require the Steam Controller to be active
-CONTROLLER_ONLY_MISSIONS = {"REMOTE_CONTROL"}
+_SPEED = config.KEYBOARD_DRIVE_SPEED
+
+MENU_KEY_MAP = {
+    'a': CMD_LEFT,
+    'd': CMD_RIGHT,
+    's': CMD_SELECT,
+    'h': CMD_HALT,
+    'q': CMD_QUIT,
+}
+
+DRIVE_KEY_MAP = {
+    'w': f"MOTOR:{-_SPEED}:{-_SPEED}",   # forward
+    's': f"MOTOR:{_SPEED}:{_SPEED}",     # backward
+    'a': f"MOTOR:{-_SPEED}:{_SPEED}",    # spin left
+    'd': f"MOTOR:{_SPEED}:{-_SPEED}",    # spin right
+    ' ': "MOTOR:0:0",                    # stop moving, stay in drive mode
+    'r': "ARM_TOGGLE",
+    'g': "GRIP_TOGGLE",
+    'h': CMD_HALT,
+    'q': CMD_QUIT,
+}
 
 
 # ------------------------------------------------------------------
@@ -64,19 +87,46 @@ CONTROLLER_ONLY_MISSIONS = {"REMOTE_CONTROL"}
 class RobotConnection:
     """Manages TCP connection to the robot with auto-reconnect."""
 
+    # Ongoing send/recv timeout once connected — bounds how long a single
+    # keypress can block the keyboard thread if the link goes half-dead
+    # (socket looks fine locally but the peer stopped acking).
+    SEND_TIMEOUT = 3.0
+
+    # Minimum time between reconnect attempts. Without this, every keypress
+    # while disconnected (and OS key-repeat sends many per second while a
+    # key is held) fires its own blocking connect() — the "reconnect loop"
+    # spam. This throttles it to one attempt per cooldown window.
+    RECONNECT_COOLDOWN = 2.0
+
     def __init__(self):
-        self.host      = config.ROBOT_IP
-        self.port      = config.SERVER_PORT
-        self.socket    = None
-        self.connected = False
-        self._lock     = threading.Lock()
+        self.host           = config.ROBOT_IP
+        self.port           = config.SERVER_PORT
+        self.socket         = None
+        self.connected      = False
+        self._lock          = threading.Lock()
+        self._last_attempt  = 0.0
 
     def connect(self) -> bool:
+        self._last_attempt = time.time()
+
+        # A previous socket left over from a dead connection is never closed
+        # before being replaced — leaks a handle on every reconnect attempt.
+        if self.socket is not None:
+            try:
+                self.socket.close()
+            except Exception:
+                pass
+            self.socket = None
+
         try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5.0)
-            self.socket.connect((self.host, self.port))
-            self.socket.settimeout(None)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect((self.host, self.port))
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            # Bounded (not None) so a half-dead link can't hang a send()
+            # indefinitely — that stall was blocking the keyboard reader.
+            sock.settimeout(self.SEND_TIMEOUT)
+            self.socket    = sock
             self.connected = True
             logger.info(f"Connected to {self.host}:{self.port}")
             return True
@@ -99,10 +149,12 @@ class RobotConnection:
                 return False
 
     def ensure_connected(self) -> bool:
-        if not self.connected:
-            logger.info("Reconnecting...")
-            return self.connect()
-        return True
+        if self.connected:
+            return True
+        if time.time() - self._last_attempt < self.RECONNECT_COOLDOWN:
+            return False
+        logger.info("Reconnecting...")
+        return self.connect()
 
     def disconnect(self):
         with self._lock:
@@ -111,6 +163,7 @@ class RobotConnection:
                     self.socket.close()
                 except Exception:
                     pass
+                self.socket = None
             self.connected = False
             logger.info("Disconnected")
 
@@ -121,23 +174,15 @@ class RobotConnection:
 
 class KeyboardBackend:
     """
-    Reads raw single keypresses in a background thread.
-    Puts commands into a shared callback.
+    Reads raw single keypresses in a background thread and passes each
+    one to a callback. Mode-dependent interpretation (menu vs drive)
+    happens in RobotController, not here.
     """
 
-    KEY_MAP = {
-        'a': CMD_LEFT,
-        'd': CMD_RIGHT,
-        's': CMD_SELECT,
-        'h': CMD_HALT,
-        'q': CMD_QUIT,
-        'p': "STEAM_TOGGLE",
-    }
-
-    def __init__(self, on_command):
-        self._on_command = on_command
-        self._thread     = None
-        self._running    = False
+    def __init__(self, on_key):
+        self._on_key  = on_key
+        self._thread  = None
+        self._running = False
 
     def start(self):
         self._running = True
@@ -158,9 +203,7 @@ class KeyboardBackend:
                     finally:
                         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-                command = self.KEY_MAP.get(key)
-                if command:
-                    self._on_command(command)
+                self._on_key(key)
 
             except Exception as e:
                 if self._running:
@@ -177,42 +220,42 @@ class KeyboardBackend:
 
 class RobotController:
     """
-    Runs keyboard and Steam Controller backends simultaneously.
-    Both feed into the same TCP connection.
-    Keyboard Q shuts everything down cleanly.
+    Keyboard-driven client. Tracks menu selection and drive mode locally
+    so the same keys can mean "navigate the menu" or "drive the robot"
+    depending on context.
     """
 
     def __init__(self):
-        self.connection    = RobotConnection()
-        self._quit_event   = threading.Event()
-        self._steam        = None  # set in run() once backend is created
-        self._steam_active = False
-        self._menu         = sorted(config.MISSIONS.keys(), key=lambda n: config.MISSIONS[n][2])
-        self._idx          = 0
+        self.connection  = RobotConnection()
+        self._quit_event = threading.Event()
+        self._menu       = sorted(config.MISSIONS.keys(), key=lambda n: config.MISSIONS[n][2])
+        self._idx        = 0
+        self._driving    = False  # True once REMOTE_CONTROL has been selected
 
-    def _on_command(self, command: str):
+    def _on_key(self, key: str):
+        key_map = DRIVE_KEY_MAP if self._driving else MENU_KEY_MAP
+        command = key_map.get(key)
+        if command is None:
+            return
+
         if command == CMD_QUIT:
             print("\nQuitting...")
             self._quit_event.set()
             return
 
-        if command == "STEAM_TOGGLE":
-            if self._steam is not None:
-                self._steam.toggle_enabled()
-                state = "ENABLED" if self._steam.is_enabled() else "PAUSED"
-                print(f"  Controller {state}")
-            return
+        if command == CMD_HALT:
+            self._driving = False
 
-        # Track menu index to mirror brain state
-        if command == CMD_LEFT:
-            self._idx = (self._idx - 1) % len(self._menu)
-        elif command == CMD_RIGHT:
-            self._idx = (self._idx + 1) % len(self._menu)
-        elif command == CMD_SELECT:
-            selected = self._menu[self._idx]
-            if selected in CONTROLLER_ONLY_MISSIONS and not self._steam_active:
-                print(f"  {selected} requires Steam Controller — not available")
-                return
+        if not self._driving:
+            if command == CMD_LEFT:
+                self._idx = (self._idx - 1) % len(self._menu)
+            elif command == CMD_RIGHT:
+                self._idx = (self._idx + 1) % len(self._menu)
+            elif command == CMD_SELECT:
+                selected = self._menu[self._idx]
+                if selected == "REMOTE_CONTROL":
+                    self._driving = True
+                    print("\n  DRIVE MODE — W/A/S/D drive, SPACE stop, R arm, G grip, H halt\n")
 
         self.connection.ensure_connected()
         self.connection.send(command)
@@ -225,26 +268,17 @@ class RobotController:
         print("=" * 50)
         print("  A - LEFT    D - RIGHT")
         print("  S - SELECT  H - HALT")
-        print("  P - PAUSE/RESUME Steam Controller")
         print("  Q - QUIT")
-        print("  Steam Controller active if connected")
+        print("  Select REMOTE_CONTROL to switch to drive mode:")
+        print("    W/A/S/D drive, SPACE stop, R arm, G grip, H halt")
         print("=" * 50 + "\n")
 
         if not self.connection.connect():
             logger.error(f"Could not connect to robot at {config.ROBOT_IP}:{config.SERVER_PORT}")
             sys.exit(1)
 
-        # Start keyboard backend
-        keyboard = KeyboardBackend(on_command=self._on_command)
+        keyboard = KeyboardBackend(on_key=self._on_key)
         keyboard.start()
-
-        # Start Steam Controller backend if available
-        self._steam        = SteamControllerBackend(on_command=self._on_command)
-        self._steam_active = self._steam.start()
-        if self._steam_active:
-            logger.info("Steam Controller active")
-        else:
-            logger.info("Steam Controller not found — keyboard only")
 
         try:
             self._quit_event.wait()  # Block until Q is pressed
@@ -252,8 +286,6 @@ class RobotController:
             print("\nInterrupted")
         finally:
             keyboard.stop()
-            if self._steam_active:
-                self._steam.stop()
             self.connection.disconnect()
             print("Controller stopped.")
 

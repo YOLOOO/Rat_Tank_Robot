@@ -20,42 +20,35 @@ This starts the brain server. You should see:
 
 ```powershell
 cd Rat/
-pip install -r requirements-dev.txt
 python controller_sender_client.py --host <ROBOT_IP>
 ```
 
-Both the keyboard and the Steam Controller are read in the same process — no separate script to launch. For the Steam Controller to be detected, connect it via its wireless dongle ("the puck") and make sure Steam is running with **Xbox Configuration Support** enabled (Steam > Big Picture > Controller Settings), so Windows sees it as a standard XInput gamepad.
+Keyboard-only client, no extra dependencies. It has two modes, both read from the same keys:
 
-Controls (keyboard):
+Menu mode (default):
 - **A** - LEFT (previous mission)
 - **D** - RIGHT (next mission)
-- **S** - SELECT (run mission)
+- **S** - SELECT (run mission — selecting REMOTE_CONTROL switches to drive mode)
 - **H** - HALT (stop everything immediately)
-- **P** - Pause / resume Steam Controller output
 - **Q** - QUIT
 
-Controls (Steam Controller) — full mapping in [steam_controller_backend.py](steam_controller_backend.py):
-- **Left stick Y / Right stick Y** - left / right track speed (DRIVE mode)
-- **A / B** - SELECT / HALT
-- **X / Y** - ARM_TOGGLE / GRIP_TOGGLE
-- **D-Pad Left / Right** - LEFT / RIGHT (menu navigate)
-- **Back** - QUIT
-- **Start** - Pause / resume controller output
-- **L3 (left stick click)** - toggle DRIVE / ARM mode (sticks then fine-adjust arm/grip servos)
+Drive mode (after selecting REMOTE_CONTROL):
+- **W / S** - forward / backward
+- **A / D** - spin left / spin right
+- **SPACE** - stop moving (stays in drive mode)
+- **R** - ARM_TOGGLE (raise/lower)
+- **G** - GRIP_TOGGLE (open/close)
+- **H** - HALT (stops the robot and returns to menu mode)
+- **Q** - QUIT
 
-To verify the controller is detected and tune axis deadzone, run:
-
-```powershell
-python tools/probe_steam_controller.py
-```
+Held-key driving isn't possible with plain console input (key presses, not press/release events), so each tap sets the motors to a fixed speed until the next tap changes it — tap W to go, tap SPACE to stop.
 
 ## System Architecture
 
 ```
-[Keyboard / Steam Controller on DEV PC]
+[Keyboard on DEV PC]
            ↓
    controller_sender_client.py
-   steam_controller_backend.py
            ↓ (TCP: commands)
   control_receiver_server.py (Robot Pi)
            ↓
@@ -77,10 +70,8 @@ python tools/probe_steam_controller.py
 ```
 Rat/
 ├── config.py                    # Central configuration
-├── controller_sender_client.py  # DEV PC client (keyboard + Steam Controller input)
-├── steam_controller_backend.py  # DEV PC client (Steam Controller input)
+├── controller_sender_client.py  # DEV PC client (keyboard input)
 ├── requirements.txt              # Robot (Raspberry Pi) dependencies
-├── requirements-dev.txt          # Dev PC (Windows) dependencies
 ├── start_rat.sh                 # Start script
 ├── stop_rat.sh                  # Stop script
 │
@@ -117,7 +108,6 @@ Rat/
 │   └── camera.py                # Camera
 │
 ├── tools/                       # Dev utilities
-│   ├── probe_steam_controller.py  # Inspect Steam Controller axes/buttons
 │   └── servo_calibrate.py       # Interactive servo calibration
 │
 └── lib_utils/                   # Vendored libraries
@@ -132,7 +122,7 @@ Edit `config.py` to:
 - Set LED colors and timings
 - Configure motor and servo pins
 - Adjust motor speeds and turn calibration
-- Configure Steam Controller parameters (poll rate, deadzone, speed scale)
+- Adjust `KEYBOARD_DRIVE_SPEED` for the keyboard remote-drive controls
 
 ## Local Dependencies
 
@@ -295,7 +285,6 @@ All hardware calls go through the abstraction layer in `common_hardware/`, enabl
 
 ## Future Phases
 
-- [x] Steam Controller input (`steam_controller_backend.py`)
 - [ ] Emergency stop button (pin reserved: GPIO26)
 - [ ] Non-blocking mission execution (`camera_test.py` still blocks the brain tick)
 - [ ] Mission chaining
