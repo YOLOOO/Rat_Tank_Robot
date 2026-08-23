@@ -143,8 +143,8 @@ class RatBrain:
             servo = get_servo_controller()
             servo.setServoStop('0')
             servo.setServoStop('1')
-        except Exception as e:
-            logger.warning(f"Servo stop error: {e}")
+        except Exception:
+            logger.exception("Servo stop error")
         logger.warning("HALT — all motion stopped")
         self._stop_mission()
         self.command_server.clear_halt()
@@ -287,8 +287,8 @@ class RatBrain:
             servo = get_servo_controller()
             servo.setServoStop('0')
             servo.setServoStop('1')
-        except Exception as e:
-            logger.warning(f"Servo cleanup error: {e}")
+        except Exception:
+            logger.exception("Servo cleanup error")
         try:
             get_led_controller().led_close()
         except Exception as e:

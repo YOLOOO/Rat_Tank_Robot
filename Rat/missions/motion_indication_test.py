@@ -182,8 +182,8 @@ def run(brain) -> bool:
                 try:
                     servo = get_servo_controller()
                     servo.setServoPwm('0', config.SERVO_CH0_MAX)
-                except Exception as e:
-                    logger.warning(f"Arm park error: {e}")
+                except Exception:
+                    logger.exception("Arm park error")
                 _phase       = 2
                 _step        = 0
                 _phase_start = time.time()
@@ -196,8 +196,8 @@ def run(brain) -> bool:
 
         return True
 
-    except Exception as e:
-        logger.error(f"Test mission error: {e}")
+    except Exception:
+        logger.exception("Test mission error")
         motor.stop()
         _initialized = False
         return False

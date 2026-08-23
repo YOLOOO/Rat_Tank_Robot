@@ -51,6 +51,16 @@ class PigpioServo:
         elif channel == '2':
             self.PwmServo.set_PWM_dutycycle(self.channel3, 80 + (400 / 180) * angle)  # Calculate and set PWM duty cycle for channel 3
 
+    def setServoStop(self, channel):
+        # Mirrors HardwareServo's interface — brain_state.py calls this
+        # unconditionally on HALT/cleanup regardless of which backend is active.
+        if channel == '0':
+            self.PwmServo.set_PWM_dutycycle(self.channel1, 0)
+        elif channel == '1':
+            self.PwmServo.set_PWM_dutycycle(self.channel2, 0)
+        elif channel == '2':
+            self.PwmServo.set_PWM_dutycycle(self.channel3, 0)
+
 # from gpiozero import AngularServo
 # from config import SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2
 # class GpiozeroServo:
@@ -91,13 +101,16 @@ class HardwareServo:
             self.pwm_gpio13 = HardwarePWM(pwm_channel=1, hz=SERVO_PWM_FREQ, chip=0)  # Initialize PWM for GPIO 13 on chip 2
         self.pwm_gpio12.start(0)  # Start PWM for GPIO 12 with 0% duty cycle
         self.pwm_gpio13.start(0)  # Start PWM for GPIO 13 with 0% duty cycle
+        self._running = {'0': True, '1': True}  # Tracks whether each PWM channel is currently enabled
 
     def setServoStop(self, channel):
         # Stop the PWM for the specified channel
         if channel == '0':
             self.pwm_gpio12.stop()  # Stop PWM for GPIO 12
+            self._running['0'] = False
         elif channel == '1':
             self.pwm_gpio13.stop()  # Stop PWM for GPIO 13
+            self._running['1'] = False
 
     def setServoFrequency(self, channel, freq):
         # Set the PWM frequency for the specified channel
@@ -118,14 +131,29 @@ class HardwareServo:
         return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
     def setServoPwm(self, channel, angle):
-        # Set the PWM duty cycle for the specified channel and angle
+        # Set the PWM duty cycle for the specified channel and angle.
+        #
+        # A prior setServoStop() disables the channel at the kernel PWM
+        # driver level (echo 0 > enable) — change_duty_cycle() alone does
+        # NOT re-enable it, it just silently updates a duty cycle nothing
+        # is outputting. Without this check, any servo move commanded
+        # after a HALT (or after cleanup() ran) would report success but
+        # never actually move the servo again for the life of the process.
         angle = _clamp_angle(channel, angle)
         if channel == '0':
             duty = self.map(angle, 0, 180, 2.5, 12.5)  # Map angle to duty cycle
-            self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 12
+            if not self._running.get('0'):
+                self.pwm_gpio12.start(duty)
+                self._running['0'] = True
+            else:
+                self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 12
         elif channel == '1':
             duty = self.map(angle, 0, 180, 2.5, 12.5)  # Map angle to duty cycle
-            self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 13
+            if not self._running.get('1'):
+                self.pwm_gpio13.start(duty)
+                self._running['1'] = True
+            else:
+                self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 13
 
 from config import SERVO_PCB_VERSION, PI_VERSION
 class Servo:
