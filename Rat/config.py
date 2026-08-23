@@ -9,7 +9,7 @@ Single source of truth for all system settings.
 # ============================================================================
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 5577
-ROBOT_IP = "192.168.0.237"  # IP address of the robot
+ROBOT_IP = "192.168.137.180"  # IP address of the robot
 COMMAND_TIMEOUT = 1.0  # seconds
 MAX_COMMAND_QUEUE_SIZE = 100
 
