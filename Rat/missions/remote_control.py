@@ -93,14 +93,14 @@ def run(brain) -> bool:
             elif command.startswith("SERVO:"):
                 _handle_servo_fine(command)
 
-    except Exception as e:
+    except Exception:
         # Never let a transient hardware hiccup take the whole session down —
         # that's what used to strand the operator: the brain would catch this
         # one level up, kill the mission, and drop into ERROR/IDLE, silently
         # ignoring every command after while the last-commanded servo held its
         # position ("stuck"). Log it, stop the motors for safety, and keep the
         # mission alive so the operator keeps getting responses.
-        logger.error(f"Remote control tick error: {e}")
+        logger.exception("Remote control tick error")
         motor.stop()
 
     return True
@@ -110,8 +110,8 @@ def _handle_motor(command: str):
     try:
         _, left, right = command.split(":")
         motor.set_motors(int(left), int(right))
-    except Exception as e:
-        logger.error(f"Bad MOTOR command '{command}': {e}")
+    except Exception:
+        logger.exception(f"Bad MOTOR command '{command}'")
         motor.stop()
 
 
@@ -124,8 +124,8 @@ def _handle_arm_toggle():
         _arm_angle = float(target)
         _arm_is_up = not _arm_is_up
         logger.debug(f"Arm {'up' if _arm_is_up else 'down'}")
-    except Exception as e:
-        logger.error(f"Arm toggle failed: {e}")
+    except Exception:
+        logger.exception("Arm toggle failed")
 
 
 def _handle_grip_toggle():
@@ -137,8 +137,8 @@ def _handle_grip_toggle():
         _grip_angle   = float(target)
         _grip_is_open = not _grip_is_open
         logger.debug(f"Grip {'open' if _grip_is_open else 'closed'}")
-    except Exception as e:
-        logger.error(f"Grip toggle failed: {e}")
+    except Exception:
+        logger.exception("Grip toggle failed")
 
 
 def _handle_servo_fine(command: str):
@@ -165,5 +165,5 @@ def _handle_servo_fine(command: str):
             servo.setServoPwm('1', _grip_angle)
             logger.debug(f"Grip fine → {_grip_angle}°")
 
-    except Exception as e:
-        logger.error(f"Bad SERVO command '{command}': {e}")
+    except Exception:
+        logger.exception(f"Bad SERVO command '{command}'")

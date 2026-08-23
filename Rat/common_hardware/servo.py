@@ -1,5 +1,29 @@
 import pigpio
-from config import SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2, SERVO_PWM_FREQ
+from config import (
+    SERVO_CHANNEL_0, SERVO_CHANNEL_1, SERVO_CHANNEL_2, SERVO_PWM_FREQ,
+    SERVO_CH0_MIN, SERVO_CH0_MAX, SERVO_CH1_MIN, SERVO_CH1_MAX,
+)
+
+
+def _clamp_angle(channel, angle):
+    """Clamp to the configured safe range for this channel.
+
+    Last line of defense at the hardware layer: callers (missions,
+    fine-servo nudges) are expected to clamp too, but a bad delta or a
+    future caller that doesn't must never be able to drive a servo past
+    its mechanical limit — a stalled servo keeps drawing current, and
+    since this is real hardware PWM it keeps outputting that signal even
+    if the process crashes before it can back off.
+    """
+    if channel == '0':
+        lo, hi = min(SERVO_CH0_MIN, SERVO_CH0_MAX), max(SERVO_CH0_MIN, SERVO_CH0_MAX)
+    elif channel == '1':
+        lo, hi = min(SERVO_CH1_MIN, SERVO_CH1_MAX), max(SERVO_CH1_MIN, SERVO_CH1_MAX)
+    else:
+        return angle
+    return max(lo, min(hi, angle))
+
+
 class PigpioServo:
     def __init__(self):
         # Initialize the PigpioServo instance
@@ -19,6 +43,7 @@ class PigpioServo:
 
     def setServoPwm(self, channel, angle):
         # Set the PWM duty cycle for the specified channel and angle
+        angle = _clamp_angle(channel, angle)
         if channel == '0':
             self.PwmServo.set_PWM_dutycycle(self.channel1, 80 + (400 / 180) * angle)  # Calculate and set PWM duty cycle for channel 1
         elif channel == '1':
@@ -94,6 +119,7 @@ class HardwareServo:
 
     def setServoPwm(self, channel, angle):
         # Set the PWM duty cycle for the specified channel and angle
+        angle = _clamp_angle(channel, angle)
         if channel == '0':
             duty = self.map(angle, 0, 180, 2.5, 12.5)  # Map angle to duty cycle
             self.setServoDuty(channel, duty)  # Set duty cycle for GPIO 12

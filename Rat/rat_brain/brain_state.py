@@ -9,6 +9,7 @@ HALT:   checked directly from server halt_flag every tick — never queued,
         never blockable
 """
 
+import faulthandler
 import logging
 import signal
 import time
@@ -25,6 +26,16 @@ logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL, logging.INFO),
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+# Catches crashes that no Python try/except can ever see: a segfault/abort in
+# a C extension (pigpio, lgpio, rpi_hardware_pwm) kills the interpreter before
+# any exception handler runs, and normally leaves zero trace of why. This
+# installs a low-level signal handler that dumps the native + Python stack of
+# every thread to a dedicated file first. It can't help with an uncatchable
+# SIGKILL (OOM killer) or a full board power-brownout/hang, but it is the one
+# thing that can explain "crashed mid remote-control session, no clue why".
+_crash_log = open("rat_brain_crash.log", "a", buffering=1)
+faulthandler.enable(file=_crash_log, all_threads=True)
 
 
 class RobotState(Enum):
@@ -186,8 +197,8 @@ class RatBrain:
                 self._stop_mission()
                 self.state = RobotState.IDLE
 
-        except Exception as e:
-            logger.error(f"Mission error: {e}")
+        except Exception:
+            logger.exception("Mission error")
             self._stop_mission()
             self.state = RobotState.ERROR
 
@@ -240,8 +251,8 @@ class RatBrain:
                     self._error_since = None
                     self.state = RobotState.IDLE
 
-        except Exception as e:
-            logger.error(f"Brain update error: {e}")
+        except Exception:
+            logger.exception("Brain update error")
             self.state = RobotState.ERROR
 
     def _handle_signal(self, signum, _frame):
@@ -262,8 +273,8 @@ class RatBrain:
                 self.update()
                 time.sleep(config.STATE_UPDATE_INTERVAL)
 
-        except Exception as e:
-            logger.error(f"Fatal error: {e}")
+        except Exception:
+            logger.exception("Fatal error")
 
         finally:
             self.cleanup()
@@ -287,8 +298,12 @@ class RatBrain:
 
 
 def main():
-    brain = RatBrain()
-    brain.run()
+    try:
+        brain = RatBrain()
+        brain.run()
+    except Exception:
+        logger.exception("RAT BRAIN crashed during startup")
+        raise
 
 
 if __name__ == "__main__":
