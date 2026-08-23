@@ -21,7 +21,10 @@ import common_hardware.motor as motor
 from common_hardware import get_led_controller, get_servo_controller
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG if config.DEBUG else logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 
 class RobotState(Enum):
@@ -94,16 +97,15 @@ class RatBrain:
 
     def _print_menu(self):
         items = self._menu_items()
-        print("\n" + "=" * 50)
-        print("  RAT OS — MISSION SELECT")
-        print("=" * 50)
+        lines = ["", "=" * 50, "  RAT OS — MISSION SELECT", "=" * 50]
         for idx, name in enumerate(items):
             marker = "→" if idx == self.selection_index else " "
             bullet = "●" if idx == self.selection_index else "○"
-            print(f"  {marker} {bullet} {name}")
-        print("=" * 50)
-        print("  LEFT / RIGHT = scroll    SELECT = run    HALT = stop")
-        print("=" * 50 + "\n")
+            lines.append(f"  {marker} {bullet} {name}")
+        lines.append("=" * 50)
+        lines.append("  LEFT / RIGHT = scroll    SELECT = run    HALT = stop")
+        lines.append("=" * 50)
+        logger.info("\n".join(lines))
 
         selected = self._selected_name()
         if selected and selected in self.missions:

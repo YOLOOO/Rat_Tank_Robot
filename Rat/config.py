@@ -106,8 +106,7 @@ PI_VERSION = 2
 # ============================================================================
 # SYSTEM CONFIGURATION
 # ============================================================================
-DEBUG = True
-LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
 EMERGENCY_STOP_PIN = 26  # Optional: GPIO for emergency stop button
 
 # ============================================================================
