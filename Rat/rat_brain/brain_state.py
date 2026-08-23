@@ -137,8 +137,19 @@ class RatBrain:
 
 
     def _process_halt(self):
+        # This is the last line of defense — clearing the halt flag and
+        # returning to IDLE must happen no matter what fails above, or a
+        # single hardware hiccup here leaves halt_flag stuck True forever.
+        # _check_halt() is the first thing every state does, so a stuck
+        # flag means _process_halt() gets retried every tick forever and
+        # the brain never processes another command again (menu, mission
+        # select, everything) — a total hang that looks like a dead robot
+        # but isn't logged as one.
         self.halt_flag = True
-        motor.stop()
+        try:
+            motor.stop()
+        except Exception:
+            logger.exception("Motor stop error during HALT")
         try:
             servo = get_servo_controller()
             servo.setServoStop('0')
@@ -146,10 +157,12 @@ class RatBrain:
         except Exception:
             logger.exception("Servo stop error")
         logger.warning("HALT — all motion stopped")
-        self._stop_mission()
-        self.command_server.clear_halt()
-        self.state     = RobotState.IDLE
-        self.halt_flag = False
+        try:
+            self._stop_mission()
+        finally:
+            self.command_server.clear_halt()
+            self.state     = RobotState.IDLE
+            self.halt_flag = False
 
     # ------------------------------------------------------------------
     # State: IDLE
@@ -223,7 +236,10 @@ class RatBrain:
         logger.info(f"Started mission: {name}")
 
     def _stop_mission(self):
-        motor.stop()
+        try:
+            motor.stop()
+        except Exception:
+            logger.exception("Motor stop error")
         self.running_mission    = None
         self.mission_start_time = None
         self._set_led(config.LED_COLORS["idle"])
