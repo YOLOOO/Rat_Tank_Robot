@@ -17,8 +17,6 @@ import logging
 
 import common_hardware.motor as motor
 from common_hardware import get_servo_controller
-from behavior_scripts.motor.stop import run as stop
-from behavior_scripts.utilities.check_halt import is_halted
 import config
 
 logger = logging.getLogger(__name__)
@@ -52,13 +50,10 @@ def _servo_clamp(angle: float, ch_min: int, ch_max: int) -> int:
 def run(brain) -> bool:
     """
     Called every brain tick while mission is active.
-    Returns True to keep running, False on halt.
+    HALT is handled entirely by the brain before this is ever called again,
+    so this always returns True — the brain is what ends the mission.
     """
     global _arm_is_up, _grip_is_open, _arm_angle, _grip_angle, _initialized
-
-    if is_halted(brain):
-        stop(brain)
-        return False
 
     try:
         if not _initialized:
