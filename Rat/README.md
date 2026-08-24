@@ -43,6 +43,17 @@ Drive mode (after selecting REMOTE_CONTROL):
 
 Held-key driving isn't possible with plain console input (key presses, not press/release events), so each tap sets the motors to a fixed speed until the next tap changes it — tap W to go, tap SPACE to stop.
 
+### AI Controller (local-LLM driven, DEV PC)
+
+Requires [Ollama](https://ollama.com) running locally with a model pulled (`ollama pull moondream` for a fast vision model, or `ollama pull llama3.2:3b` for text-only). See `Rat/docs/AI_controlled.md` for full setup.
+
+```bash
+pip install requests
+python AI_controller_client.py --host <ROBOT_IP> --task "navigate toward the nearest wall and stop 20cm away from it"
+```
+
+Selects the `AI_CONTROLLED` mission on the robot, opens a second TCP channel (port 5578) for the robot to stream telemetry back, and drives the robot with one Ollama call per loop tick (`AI_LOOP_RATE` in `config.py`). Ctrl-C sends HALT before exiting.
+
 ## System Architecture
 
 ```
@@ -71,6 +82,7 @@ Held-key driving isn't possible with plain console input (key presses, not press
 Rat/
 ├── config.py                    # Central configuration
 ├── controller_sender_client.py  # DEV PC client (keyboard input)
+├── AI_controller_client.py      # DEV PC client (local-LLM driven, see docs/AI_controlled.md)
 ├── requirements.txt              # Robot (Raspberry Pi) dependencies
 ├── start_rat.sh                 # Start script
 ├── stop_rat.sh                  # Stop script
@@ -81,6 +93,7 @@ Rat/
 │   └── control_receiver_server.py  # TCP server
 │
 ├── missions/                    # Selectable routines (registered in config)
+│   ├── AI_controlled.py         # AI_CONTROLLED
 │   ├── camera_test.py           # CAMERA_TEST
 │   ├── motion_indication_test.py  # MOTION_TEST
 │   ├── obstacle_course.py       # OBSTACLE_COURSE
@@ -224,9 +237,12 @@ MOTOR:left:right\n  # set motor duties directly (-4095..+4095), used by remote_c
 SERVO:ch:delta\n    # nudge servo ch (0=arm, 1=grip) by delta degrees
 ARM_TOGGLE\n        # toggle arm up/down preset
 GRIP_TOGGLE\n       # toggle grip open/closed preset
+AI_CMD:*\n          # AI_CONTROLLED mission commands — see docs/AI_controlled.md
 ```
 
 Example: `nc robot_ip 5577` then type `LEFT` + Enter.
+
+`AI_CONTROLLED` additionally opens a second, robot-initiated TCP connection to the currently-connected controller's IP on port `AI_TELEMETRY_PORT` (5578, see `config.py`) to stream sensor telemetry back — see `docs/AI_controlled.md` for the wire format.
 
 ## Behavior Scripts
 
@@ -289,7 +305,7 @@ All hardware calls go through the abstraction layer in `common_hardware/`, enabl
 - [ ] Non-blocking mission execution (`camera_test.py` still blocks the brain tick)
 - [ ] Mission chaining
 - [ ] Return-to-home
-- [ ] Bidirectional communication (sensor data back to PC)
+- [x] Bidirectional communication (sensor data back to PC) — `AI_CONTROLLED` mission
 - [ ] Script auto-discovery
 
 ## References

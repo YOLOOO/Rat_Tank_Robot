@@ -23,7 +23,12 @@ VALID_COMMANDS = {
     "LEFT", "RIGHT", "SELECT", "HALT",
     # remote_control mission commands
     "ARM_TOGGLE", "GRIP_TOGGLE",
-    # MOTOR:left:right is validated separately due to dynamic values
+    # AI_controlled mission commands
+    "AI_CMD:FORWARD", "AI_CMD:BACKWARD", "AI_CMD:SPIN_LEFT", "AI_CMD:SPIN_RIGHT",
+    "AI_CMD:STOP", "AI_CMD:ARM_UP", "AI_CMD:ARM_DOWN",
+    "AI_CMD:GRIP_OPEN", "AI_CMD:GRIP_CLOSE", "AI_CMD:SNAPSHOT",
+    # MOTOR:left:right, SERVO:ch:delta, AI_CMD:FORWARD:slow etc. are
+    # validated separately due to dynamic/variable-length values
 }
 
 # How long a connected client can go without sending anything before the
@@ -43,10 +48,14 @@ class CommandReceiverServer:
         self.command_queue = Queue(maxsize=config.MAX_COMMAND_QUEUE_SIZE)
         self.halt_flag     = False  # Set immediately on HALT, never queued
 
-        self.server_socket = None
-        self.client_socket = None
-        self.server_thread = None
-        self.running       = False
+        self.server_socket  = None
+        self.client_socket  = None
+        self.client_address = None  # IP of the current controller — missions that
+                                     # need to open their own outbound connection
+                                     # back to the controller (e.g. AI telemetry)
+                                     # read this instead of hardcoding an address.
+        self.server_thread  = None
+        self.running        = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -99,7 +108,8 @@ class CommandReceiverServer:
                     # zombie that never sent a clean disconnect — evict it
                     # immediately instead of leaving two sockets alive.
                     old_socket = self.client_socket
-                    self.client_socket = client_socket
+                    self.client_socket  = client_socket
+                    self.client_address = addr[0]
                     if old_socket is not None:
                         try:
                             old_socket.close()
@@ -170,7 +180,8 @@ class CommandReceiverServer:
             # Don't clobber a newer connection's slot if we were already
             # evicted by _run_server before this thread noticed.
             if self.client_socket is client_socket:
-                self.client_socket = None
+                self.client_socket  = None
+                self.client_address = None
             logger.info(f"Client {addr} closed")
 
     # ------------------------------------------------------------------
@@ -191,6 +202,26 @@ class CommandReceiverServer:
             logger.warning(f"Malformed command: {command}")
             return False
 
+    def _validate_ai_cmd(self, command: str) -> bool:
+        """AI_CMD: has several shapes — plain, :SLOW/:FAST modifier, or
+        CURVE:left:right with two ints. Simple keyword commands are checked
+        against VALID_COMMANDS; the rest are validated here."""
+        parts = command.split(":")
+
+        if len(parts) == 3 and parts[1] in ("FORWARD", "BACKWARD") and parts[2] in ("SLOW", "FAST"):
+            return True
+
+        if len(parts) == 4 and parts[1] == "CURVE":
+            try:
+                int(parts[2])
+                int(parts[3])
+                return True
+            except ValueError:
+                pass
+
+        logger.warning(f"Malformed command: {command}")
+        return False
+
     def _process_command(self, command: str):
         command = command.strip().upper()
 
@@ -202,6 +233,10 @@ class CommandReceiverServer:
 
         if command.startswith("MOTOR:") or command.startswith("SERVO:"):
             if not self._validate_two_int_command(command):
+                return
+
+        elif command.startswith("AI_CMD:"):
+            if command not in VALID_COMMANDS and not self._validate_ai_cmd(command):
                 return
 
         elif command not in VALID_COMMANDS:

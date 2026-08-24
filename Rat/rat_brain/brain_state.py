@@ -240,6 +240,14 @@ class RatBrain:
             motor.stop()
         except Exception:
             logger.exception("Motor stop error")
+        # Missions that hold resources beyond a single run() call (background
+        # threads, an open camera) never get another run() after HALT — the
+        # brain drops straight to IDLE — so this is their only teardown hook.
+        if self.running_mission is not None and hasattr(self.running_mission, "on_stop"):
+            try:
+                self.running_mission.on_stop(self)
+            except Exception:
+                logger.exception("Mission on_stop error")
         self.running_mission    = None
         self.mission_start_time = None
         self._set_led(config.LED_COLORS["idle"])

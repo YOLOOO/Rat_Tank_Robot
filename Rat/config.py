@@ -24,6 +24,7 @@ MISSIONS = {
     "SENSORY_TEST":   ("missions.sensory_test",           (0,   255, 0),   2),  # Green   - sensor readout test
     "REMOTE_CONTROL": ("missions.remote_control",         (0,   0,   255), 3),  # Blue    - controller control
     "CAMERA_TEST":    ("missions.camera_test",            (255, 0,   255), 4),  # Magenta - camera test
+    "AI_CONTROLLED":  ("missions.AI_controlled",          (0,   100, 255), 5),  # Cyan-blue - LLM-driven autonomy
 }
 
 # ============================================================================
@@ -62,6 +63,28 @@ MOTOR_MAX_DUTY = 4095
 MOTOR_SPEED_NORMAL = 2048
 MOTOR_SPEED_SLOW   = 1024
 MOTOR_SPEED_FAST   = 3500
+
+# A stopped tank track commonly can't overcome static friction below ~35-50%
+# PWM duty, even though it can sustain motion at a lower duty once rolling.
+# MOTOR_SPEED_SLOW (1024/4095 = 25%) is below that threshold, so starting
+# from a stop at :SLOW would silently just sit there. Below this fraction of
+# MOTOR_MAX_DUTY, a motor starting from 0 gets a brief kick first.
+MOTOR_KICKSTART_THRESHOLD = 0.35
+MOTOR_KICKSTART_MS        = 120
+# Kick at a fraction of full duty rather than literally 100% — enough to
+# break static friction without doubling the worst-case simultaneous current
+# draw when both tracks kick together (a real brownout risk on a shared
+# battery/regulator — a full system freeze, SSH included, is the symptom).
+MOTOR_KICKSTART_DUTY      = 0.75
+
+# Reversing a spinning track straight into the opposite direction
+# (plug-braking) draws more current than starting from a stop — often the
+# single biggest current spike a motor driver sees. Force a brief settle at
+# zero duty before honoring any command that flips a track's sign. This is
+# also the "grace period" for an upstream controller (e.g. the AI loop)
+# that changes its mind rapidly — it's enforced here, once, for every
+# caller, rather than trusted to each mission.
+MOTOR_REVERSAL_SETTLE_MS  = 150
 
 # Turn calibration — degrees the robot rotates per second at MOTOR_SPEED_NORMAL
 # Tune this on your actual surface
@@ -128,4 +151,36 @@ CAMERA_STREAM_HOST = "0.0.0.0"
 # ============================================================================
 # Motor duty used for W/A/S/D drive commands in controller_sender_client.py
 KEYBOARD_DRIVE_SPEED = MOTOR_SPEED_FAST
+
+# ============================================================================
+# AI CONTROLLER CONFIGURATION
+# ============================================================================
+# Robot side: missions/AI_controlled.py    Dev PC side: AI_controller_client.py
+AI_TELEMETRY_PORT       = 5578          # Robot → Dev PC telemetry channel
+AI_TELEMETRY_RATE       = 0.2           # Seconds between telemetry sends (5 Hz)
+AI_CAMERA_RATE          = 2.0           # Seconds between camera snapshots (0 = disabled)
+AI_CAMERA_SIZE          = (320, 240)    # Snapshot resolution for LLM consumption
+AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = smaller payload)
+
+# Below this, any command that would drive a track forward is blocked.
+# Checked in two places: AI_controlled.py's onboard interlock (every ~50ms
+# tick, using the live sensor reading, regardless of what the dev PC sent)
+# and AI_controller_client.py's client-side override (once per LLM
+# decision). The onboard check is the one that actually matters for not
+# hitting things — the client-side one only catches it a decision earlier.
+AI_MIN_OBSTACLE_CM      = 10
+
+AI_OLLAMA_HOST          = "http://localhost:11434"
+AI_DEFAULT_MODEL        = "llava"       # Any Ollama model; vision models receive images
+AI_LOOP_RATE            = 1.0           # Seconds between LLM calls (1 Hz default)
+AI_COMMAND_HISTORY      = 5             # How many past actions to include in LLM context
+AI_OLLAMA_TIMEOUT       = 60.0          # HTTP timeout for /api/generate — local model cold-starts
+                                         # (especially vision models) routinely take well over 15s
+AI_HEARTBEAT_INTERVAL   = 5.0           # Seconds between keepalive bytes on the command channel —
+                                         # keeps it under the robot's CLIENT_IDLE_TIMEOUT (15s) even
+                                         # when a single Ollama call takes longer than that to return
+
+# Robot-side status LED (missions/AI_controlled.py)
+AI_LED_SPIN_INTERVAL    = 0.15          # Seconds between spin steps on the 4-LED "waiting on LLM" chase
+AI_UNRESPONSIVE_WINDOW  = 5.0           # Seconds a tick error keeps the status LED solid red
 

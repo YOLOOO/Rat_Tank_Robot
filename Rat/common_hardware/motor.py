@@ -15,6 +15,7 @@ Internally scaled to 0.0–1.0 for gpiozero PWMOutputDevice.
 import os
 os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"
 
+import time
 from gpiozero import PWMOutputDevice
 import atexit
 import config
@@ -24,6 +25,11 @@ _m1p = None
 _m1m = None
 _m2p = None
 _m2m = None
+
+# Last commanded duty per track — used to detect a 0 -> moving transition,
+# which is the only time a kickstart pulse is needed.
+_m1_last = 0
+_m2_last = 0
 
 
 def _init():
@@ -42,7 +48,9 @@ def _scale(value: int) -> float:
 
 
 def _set_motor(plus_dev, minus_dev, duty: int):
-    """Drive one motor. Positive = forward, negative = backward, 0 = stop."""
+    """Drive one motor. Positive = physically backward, negative = physically
+    forward, 0 = stop — the "+"/"-" pin labels are wiring, not direction; see
+    set_motors()."""
     if duty > 0:
         minus_dev.value = 0
         plus_dev.value  = _scale(duty)
@@ -54,24 +62,76 @@ def _set_motor(plus_dev, minus_dev, duty: int):
         minus_dev.value = 0
 
 
+def _needs_kickstart(last_duty: int, duty: int) -> bool:
+    return last_duty == 0 and duty != 0 and _scale(duty) < config.MOTOR_KICKSTART_THRESHOLD
+
+
+def _is_reversal(last_duty: int, duty: int) -> bool:
+    return last_duty != 0 and duty != 0 and (last_duty > 0) != (duty > 0)
+
+
 # --- Public API ---
 
 def set_motors(left: int, right: int):
     """
     Drive both tracks independently.
-    left, right : -4095 (full reverse) to +4095 (full forward)
+    left, right : -4095 (full physically-forward) to +4095 (full physically-
+    backward) — inverted from what the "+"/"-" pin naming suggests; verified
+    against the real chassis via the manually-tuned remote_control.py key
+    bindings (w/s), which pass raw MOTOR:left:right values straight through
+    to this function.
+
+    Two safety passes before the requested duty is actually applied:
+
+    1. Reversal settle — plug-braking a spinning track straight into the
+       opposite direction draws more current than starting from a stop.
+       A track whose sign is flipping is forced to zero duty first and
+       held there for MOTOR_REVERSAL_SETTLE_MS.
+    2. Kickstart — a track starting from a dead stop at a low commanded
+       duty may not have enough torque to overcome static friction (it can
+       sustain motion at that duty once rolling, but never gets there), so
+       it gets a brief kick toward MOTOR_KICKSTART_DUTY first.
+
+    Both passes fire on both tracks together where needed, rather than one
+    track at a time, so a straight command only pays each delay once.
     """
+    global _m1_last, _m2_last
     _init()
+
+    reversal_left  = _is_reversal(_m1_last, left)
+    reversal_right = _is_reversal(_m2_last, right)
+
+    if reversal_left or reversal_right:
+        if reversal_left:
+            _set_motor(_m1p, _m1m, 0)
+            _m1_last = 0
+        if reversal_right:
+            _set_motor(_m2p, _m2m, 0)
+            _m2_last = 0
+        time.sleep(config.MOTOR_REVERSAL_SETTLE_MS / 1000.0)
+
+    kick_left  = _needs_kickstart(_m1_last, left)
+    kick_right = _needs_kickstart(_m2_last, right)
+
+    if kick_left or kick_right:
+        kick_duty = int(config.MOTOR_MAX_DUTY * config.MOTOR_KICKSTART_DUTY)
+        if kick_left:
+            _set_motor(_m1p, _m1m, kick_duty if left > 0 else -kick_duty)
+        if kick_right:
+            _set_motor(_m2p, _m2m, kick_duty if right > 0 else -kick_duty)
+        time.sleep(config.MOTOR_KICKSTART_MS / 1000.0)
+
     _set_motor(_m1p, _m1m, left)
     _set_motor(_m2p, _m2m, right)
+    _m1_last, _m2_last = left, right
 
 
 def forward(speed: int = config.MOTOR_SPEED_NORMAL):
-    set_motors(speed, speed)
+    set_motors(-speed, -speed)
 
 
 def backward(speed: int = config.MOTOR_SPEED_NORMAL):
-    set_motors(-speed, -speed)
+    set_motors(speed, speed)
 
 
 def spin_left(speed: int = config.MOTOR_SPEED_NORMAL):
