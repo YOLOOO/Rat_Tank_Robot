@@ -2,6 +2,18 @@
 
 MVP implementation of a modular robot control system for the Freenove Tank (FNK0077) running on Raspberry Pi 5.
 
+## Hardware
+
+| Component | Detail |
+|-----------|--------|
+| Platform | Freenove FNK0077 tank |
+| SBC | Raspberry Pi 5 |
+| PCB | v2.0 |
+| LEDs | 4x WS2812 via SPI (GRB) |
+| Motors | 2x track motors via gpiozero/lgpio |
+| Servos | Hardware PWM via pigpiod |
+| Controller | MNT Reform Trackball (RP2040) over USB/TCP |
+
 ## Quick Start
 
 ### On Robot (Raspberry Pi 5)
@@ -45,14 +57,16 @@ Held-key driving isn't possible with plain console input (key presses, not press
 
 ### AI Controller (local-LLM driven, DEV PC)
 
-Requires [Ollama](https://ollama.com) running locally with a model pulled (`ollama pull moondream` for a fast vision model, or `ollama pull llama3.2:3b` for text-only). See `Rat/docs/AI_controlled.md` for full setup.
+Requires [Ollama](https://ollama.com) running locally with a model pulled (`ollama pull moondream` for a fast vision model — the default, or `ollama pull llama3.2:3b` for text-only). See [AI Controller Reference](#ai-controller-reference) below for the full flag list, wire format, safety model, and goal system.
 
 ```bash
 pip install requests
-python AI_controller_client.py --host <ROBOT_IP> --task "navigate toward the nearest wall and stop 20cm away from it"
+./start_ai                                                          # demo run, all defaults from config.py
+./start_ai --task "navigate toward the nearest wall and stop 20cm away from it"
+./start_ai --goal-distance-cm 20 --goal-tolerance-cm 3 --max-duration-s 120
 ```
 
-Selects the `AI_CONTROLLED` mission on the robot, opens a second TCP channel (port 5578) for the robot to stream telemetry back, and drives the robot with one Ollama call per loop tick (`AI_LOOP_RATE` in `config.py`). Ctrl-C sends HALT before exiting.
+`./start_ai` is a thin wrapper that execs `AI_controller_client.py` with your extra args — run the client directly if you'd rather not use it. Selects the `AI_CONTROLLED` mission on the robot, opens a second TCP channel (port 5578) for the robot to stream telemetry back, and drives the robot with one Ollama call per loop tick (`AI_LOOP_RATE` in `config.py`). Ctrl-C sends HALT before exiting; the robot can also end the mission itself (goal reached, stuck, timed out, or a dead sensor), in which case the client exits 0 or 1 accordingly.
 
 ## System Architecture
 
@@ -82,7 +96,8 @@ Selects the `AI_CONTROLLED` mission on the robot, opens a second TCP channel (po
 Rat/
 ├── config.py                    # Central configuration
 ├── controller_sender_client.py  # DEV PC client (keyboard input)
-├── AI_controller_client.py      # DEV PC client (local-LLM driven, see docs/AI_controlled.md)
+├── AI_controller_client.py      # DEV PC client (local-LLM driven, see AI Controller Reference below)
+├── start_ai                     # DEV PC launcher — AI_controller_client.py with config.py defaults
 ├── requirements.txt              # Robot (Raspberry Pi) dependencies
 ├── start_rat.sh                 # Start script
 ├── stop_rat.sh                  # Stop script
@@ -96,7 +111,6 @@ Rat/
 │   ├── AI_controlled.py         # AI_CONTROLLED
 │   ├── camera_test.py           # CAMERA_TEST
 │   ├── motion_indication_test.py  # MOTION_TEST
-│   ├── obstacle_course.py       # OBSTACLE_COURSE
 │   ├── remote_control.py        # REMOTE_CONTROL
 │   └── sensory_test.py          # SENSORY_TEST
 │
@@ -237,12 +251,79 @@ MOTOR:left:right\n  # set motor duties directly (-4095..+4095), used by remote_c
 SERVO:ch:delta\n    # nudge servo ch (0=arm, 1=grip) by delta degrees
 ARM_TOGGLE\n        # toggle arm up/down preset
 GRIP_TOGGLE\n       # toggle grip open/closed preset
-AI_CMD:*\n          # AI_CONTROLLED mission commands — see docs/AI_controlled.md
+AI_CMD:*\n          # AI_CONTROLLED mission commands — see AI Controller Reference below
 ```
 
 Example: `nc robot_ip 5577` then type `LEFT` + Enter.
 
-`AI_CONTROLLED` additionally opens a second, robot-initiated TCP connection to the currently-connected controller's IP on port `AI_TELEMETRY_PORT` (5578, see `config.py`) to stream sensor telemetry back — see `docs/AI_controlled.md` for the wire format.
+`AI_CONTROLLED` additionally opens a second, robot-initiated TCP connection to the currently-connected controller's IP on port `AI_TELEMETRY_PORT` (5578, see `config.py`) to stream sensor telemetry back — see AI Controller Reference below for the wire format.
+
+## AI Controller Reference
+
+Local-LLM-driven autonomy. Two processes: `missions/AI_controlled.py` runs on the robot as a normal mission; `AI_controller_client.py` (or `./start_ai`) runs on the dev PC, feeds an [Ollama](https://ollama.com) model one prompt per loop tick, and turns its response into one `AI_CMD:` action sent back to the robot.
+
+### Usage
+
+```bash
+./start_ai                                                          # all defaults from config.py
+python AI_controller_client.py --host <ROBOT_IP> --task "..." [flags]
+```
+
+| Flag | Default (`config.py`) | Meaning |
+|------|------------------------|---------|
+| `--host` | `ROBOT_IP` | Robot IP address |
+| `--task` | `AI_DEFAULT_TASK` | Natural-language task given to the LLM |
+| `--model` | `AI_DEFAULT_MODEL` (`moondream`) | Ollama model name — vision models get the camera frame attached |
+| `--loop-rate` | `AI_LOOP_RATE` | Seconds between LLM calls |
+| `--goal-distance-cm` | `AI_GOAL_DISTANCE_CM` (none) | Mission ends `GOAL_REACHED` once `dist_cm` is within `--goal-tolerance-cm` of this |
+| `--goal-ir` | `AI_GOAL_IR` (none) | Mission ends `GOAL_REACHED` once the IR bitmask (`left<<2 \| center<<1 \| right`, 0-7) reads exactly this |
+| `--goal-tolerance-cm` | `AI_GOAL_TOLERANCE_CM` | Tolerance for `--goal-distance-cm` |
+| `--max-duration-s` | `AI_MAX_DURATION_S` (0 = disabled) | Mission ends `TIMEOUT` after this many seconds |
+
+If both `--goal-distance-cm` and `--goal-ir` are given, both must be satisfied simultaneously. With neither given, the mission just runs until HALT, `STUCK`, `TIMEOUT` (if set), or `SENSOR_FAULT` — the sensor/stuck protections are always on regardless of whether a goal is configured.
+
+### Wire format
+
+`AI_CMD:` commands (dev PC → robot, existing command channel, port `SERVER_PORT`):
+
+```
+AI_CMD:FORWARD[:SLOW|:FAST]
+AI_CMD:BACKWARD[:SLOW|:FAST]
+AI_CMD:SPIN_LEFT
+AI_CMD:SPIN_RIGHT
+AI_CMD:CURVE:left:right          # -4095..4095 per track, same convention as motor_l/motor_r below
+AI_CMD:STOP
+AI_CMD:ARM_UP / AI_CMD:ARM_DOWN
+AI_CMD:GRIP_OPEN / AI_CMD:GRIP_CLOSE
+AI_CMD:SNAPSHOT                  # force an out-of-cycle camera capture
+AI_CMD:GOAL:dist_cm:ir:tolerance_cm:max_duration_s   # sent once by the client right after mission select;
+                                                      # -1 on dist_cm/ir means "no goal on that axis"
+```
+
+Telemetry (robot → dev PC, robot-initiated, port `AI_TELEMETRY_PORT`, newline-delimited JSON, ~5Hz):
+
+```json
+{
+  "t": 1234567890.1,
+  "dist_cm": 34.2,
+  "ir": [0, 1, 0],
+  "motor_l": -2048, "motor_r": -2048,
+  "arm": "down", "grip": "closed",
+  "status": "RUNNING", "reason": "",
+  "frame_b64": "..."
+}
+```
+
+`status` is `"RUNNING"` on every regular tick. The mission can end itself and report why in one final payload before it stops: `GOAL_REACHED`, `STUCK` (kept re-trying a blocked forward move past `AI_STUCK_TIMEOUT_S`), `TIMEOUT` (past `--max-duration-s`), or `SENSOR_FAULT` (a sensor stayed dead past `AI_SENSOR_FAULT_TIMEOUT_S`, or failed outright at mission start, in which case the robot aborts into `ERROR` instead — see below). `AI_controller_client.py` watches this field and exits 0 on `GOAL_REACHED`, 1 on anything else. `frame_b64` is only present the tick after a new camera frame was captured (`AI_CAMERA_RATE`), not on every payload.
+
+### Safety model
+
+Two independent layers, deliberately redundant:
+
+1. **Onboard interlock** (robot, `missions/AI_controlled.py`, every ~50ms tick) — blocks any command that would drive a track forward while `dist_cm` is below `AI_MIN_OBSTACLE_CM` or reading `-1` (sensor error, treated as "obstacle"). This is the one that actually matters: it reacts on the live sensor reading regardless of what the dev PC last sent, so it isn't at the mercy of the LLM loop's slower cadence.
+2. **Client-side override** (dev PC, `AI_controller_client.py`) — rewrites a forward-type LLM decision to `STOP` before it's even sent, using the same `AI_MIN_OBSTACLE_CM` threshold from `config.py`. Local models are unreliable about obeying the numeric rule in the prompt; this catches it a decision earlier than the onboard check would.
+
+Also: before either layer runs, the robot pre-flight-checks both sensors (`AI_PREFLIGHT_READS` back-to-back reads on each) before arming motors or opening telemetry — a sensor that fails outright aborts the mission into `ERROR` rather than silently starting up.
 
 ## Behavior Scripts
 

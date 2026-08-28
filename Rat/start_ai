@@ -1,0 +1,22 @@
+#!/bin/bash
+#
+# START AI CONTROLLER
+# ====================
+# Launches AI_controller_client.py (dev PC side) with the defaults baked
+# into config.py — host, model, loop rate, task, goal. Every flag can still
+# be overridden on the command line; this just saves retyping the common
+# case, matching start_rat.sh/stop_rat.sh conventions on the robot side.
+#
+# Usage:
+#   ./start_ai                                          — demo run, all defaults
+#   ./start_ai --task "find the red ball and stop near it"
+#   ./start_ai --goal-distance-cm 20 --goal-tolerance-cm 3 --max-duration-s 120
+#
+# Ctrl-C sends HALT to the robot before exiting. See AI_controller_client.py
+# --help for the full flag list.
+#
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$DIR"
+
+exec python3 AI_controller_client.py "$@"

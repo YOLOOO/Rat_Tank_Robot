@@ -8,8 +8,12 @@ loop tick, and sends back one AI_CMD: action.
 
 Usage:
     python AI_controller_client.py --host 192.168.0.237 --task "navigate toward the nearest wall and stop 20cm away from it"
+    python AI_controller_client.py --host 192.168.0.237 --goal-distance-cm 20 --goal-tolerance-cm 3 --max-duration-s 120
 
-Ctrl-C sends HALT to the robot before exiting.
+Ctrl-C sends HALT to the robot before exiting. The robot can also end the
+mission on its own — GOAL_REACHED, STUCK, TIMEOUT, or SENSOR_FAULT, reported
+over telemetry's "status"/"reason" fields — in which case this process exits
+0 for GOAL_REACHED and 1 for anything else.
 
 Requires: pip install requests   (not in requirements.txt — that file is
 robot-only GPIO libs; do not install it on the dev PC.)
@@ -90,6 +94,15 @@ CURRENT STATE:
 
 Respond with one action:"""
 
+# Appended to image_line only when a frame is actually attached — gives the
+# vision model something concrete to look for instead of just receiving a
+# picture with no instructions. The numeric dist_cm above is ground truth
+# for distance (the camera is for identifying what's ahead / the target
+# object, not for judging range).
+VISION_INSTRUCTION = (
+    " — look for obstacles in your path and anything matching the TASK's "
+    "target; use dist_cm above as the actual distance, not your visual guess"
+)
 
 # ------------------------------------------------------------------
 # Telemetry server (robot -> dev PC)
@@ -254,10 +267,19 @@ def _detect_vision(model: str) -> bool:
 
 def _call_ollama(model: str, prompt: str, frame_b64, vision: bool) -> str:
     payload = {"model": model, "prompt": prompt, "stream": False}
-    if frame_b64 and vision:
+    has_image = bool(frame_b64 and vision)
+    if has_image:
         payload["images"] = [frame_b64]
+    started = time.time()
     resp = requests.post(f"{config.AI_OLLAMA_HOST}/api/generate", json=payload, timeout=config.AI_OLLAMA_TIMEOUT)
     resp.raise_for_status()
+    # Real round-trip time, logged every call rather than measured once —
+    # vision calls (has_image=True) are the ones most likely to blow past
+    # AI_LOOP_RATE, and cold/thermal-throttled behavior drifts over a
+    # session, so a one-time measurement wouldn't stay representative.
+    elapsed = time.time() - started
+    level = logger.warning if elapsed > config.AI_LOOP_RATE else logger.debug
+    level(f"Ollama call took {elapsed:.2f}s (image={has_image})")
     return resp.json().get("response", "").strip()
 
 
@@ -319,7 +341,7 @@ def _format_history(history) -> str:
 def _build_prompt(task: str, history, snap: dict, vision: bool) -> str:
     ir = snap.get("ir") or [0, 0, 0]
     frame_b64  = snap.get("frame_b64")
-    image_line = "  camera  : [image attached]" if (frame_b64 and vision) else ""
+    image_line = f"  camera  : [image attached]{VISION_INSTRUCTION}" if (frame_b64 and vision) else ""
 
     return SYSTEM_PROMPT_TEMPLATE.format(
         task=task,
@@ -338,12 +360,34 @@ def _build_prompt(task: str, history, snap: dict, vision: bool) -> str:
 # Main loop
 # ------------------------------------------------------------------
 
+def _send_goal(sock: socket.socket, args) -> None:
+    """AI_CMD:GOAL:dist_cm:ir:tolerance_cm:max_duration_s — sent once right
+    after mission select. -1 on dist_cm/ir means "no goal on that axis"; the
+    robot evaluates this every tick and reports GOAL_REACHED/STUCK/TIMEOUT/
+    SENSOR_FAULT back over telemetry (see missions/AI_controlled.py)."""
+    goal_dist = args.goal_distance_cm if args.goal_distance_cm is not None else -1
+    goal_ir   = args.goal_ir if args.goal_ir is not None else -1
+    _send(sock, f"AI_CMD:GOAL:{goal_dist}:{goal_ir}:{args.goal_tolerance_cm}:{args.max_duration_s}")
+    logger.info(
+        f"Goal sent: goal_distance_cm={args.goal_distance_cm} goal_ir={args.goal_ir} "
+        f"tolerance_cm={args.goal_tolerance_cm} max_duration_s={args.max_duration_s}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Local-LLM control loop for the Rat tank robot")
     parser.add_argument("--host", default=config.ROBOT_IP, help="Robot IP address")
-    parser.add_argument("--task", required=True, help="Natural-language task for the LLM")
+    parser.add_argument("--task", default=config.AI_DEFAULT_TASK, help="Natural-language task for the LLM")
     parser.add_argument("--model", default=config.AI_DEFAULT_MODEL, help="Ollama model name")
     parser.add_argument("--loop-rate", type=float, default=config.AI_LOOP_RATE, help="Seconds between LLM calls")
+    parser.add_argument("--goal-distance-cm", type=float, default=config.AI_GOAL_DISTANCE_CM,
+                         help="Stop once within --goal-tolerance-cm of this distance (default: no distance goal)")
+    parser.add_argument("--goal-ir", type=int, default=config.AI_GOAL_IR, choices=range(0, 8), metavar="0-7",
+                         help="Stop once the IR bitmask (left<<2|center<<1|right) reads exactly this (default: no IR goal)")
+    parser.add_argument("--goal-tolerance-cm", type=float, default=config.AI_GOAL_TOLERANCE_CM,
+                         help="Tolerance in cm for --goal-distance-cm")
+    parser.add_argument("--max-duration-s", type=float, default=config.AI_MAX_DURATION_S,
+                         help="Abort with TIMEOUT after this many seconds (default: 0 = disabled)")
     args = parser.parse_args()
 
     telemetry = TelemetryServer(config.AI_TELEMETRY_PORT)
@@ -355,12 +399,14 @@ def main():
         sys.exit(1)
 
     _select_ai_mission(robot_sock)
+    _send_goal(robot_sock, args)
 
     vision = _detect_vision(args.model)
     logger.info(f"Model '{args.model}' vision={vision}")
 
     history   = deque(maxlen=config.AI_COMMAND_HISTORY)
     stop_event = threading.Event()
+    exit_code  = 0
 
     def _shutdown(*_):
         if stop_event.is_set():
@@ -382,19 +428,33 @@ def main():
                 time.sleep(0.2)
                 continue
 
+            status = snap.get("status", "RUNNING")
+            if status != "RUNNING":
+                reason = snap.get("reason", "")
+                exit_code = 0 if status == "GOAL_REACHED" else 1
+                logger.info(f"Mission ended: status={status} reason={reason!r} — exiting {exit_code}")
+                break
+
             prompt = _build_prompt(args.task, history, snap, vision)
             frame_b64 = snap.get("frame_b64") if vision else None
 
             try:
                 raw = _call_ollama(args.model, prompt, frame_b64, vision)
             except Exception:
-                logger.exception("Ollama call failed")
+                # Vision calls are decision-relevant now, not just descriptive
+                # — continuing on whatever the robot's last AI_CMD happened to
+                # be (its only option, since nothing new arrived) risks
+                # driving blind on a stale decision. Explicitly STOP instead
+                # and let the next successful call re-decide from a standstill.
+                logger.exception("Ollama call failed — sending STOP")
+                _send(robot_sock, "AI_CMD:STOP")
                 time.sleep(args.loop_rate)
                 continue
 
             action = _parse_action(raw)
             if action is None:
-                logger.warning(f"Unparseable LLM response, ignoring: {raw!r}")
+                logger.warning(f"Unparseable LLM response — sending STOP, ignoring: {raw!r}")
+                _send(robot_sock, "AI_CMD:STOP")
                 time.sleep(args.loop_rate)
                 continue
 
@@ -410,6 +470,8 @@ def main():
 
     finally:
         _shutdown()
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

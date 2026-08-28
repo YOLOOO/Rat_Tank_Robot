@@ -158,7 +158,11 @@ KEYBOARD_DRIVE_SPEED = MOTOR_SPEED_FAST
 # Robot side: missions/AI_controlled.py    Dev PC side: AI_controller_client.py
 AI_TELEMETRY_PORT       = 5578          # Robot → Dev PC telemetry channel
 AI_TELEMETRY_RATE       = 0.2           # Seconds between telemetry sends (5 Hz)
-AI_CAMERA_RATE          = 2.0           # Seconds between camera snapshots (0 = disabled)
+# Matched to AI_LOOP_RATE so a fresh frame is normally ready by the time the
+# LLM loop wants one, without adding wait-for-fresh-frame logic to the loop
+# itself — the loop still just reads whatever the snapshot thread last
+# captured (see _snapshot_loop()), it's just rarely more than one tick stale.
+AI_CAMERA_RATE          = 1.0           # Seconds between camera snapshots (0 = disabled)
 AI_CAMERA_SIZE          = (320, 240)    # Snapshot resolution for LLM consumption
 AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = smaller payload)
 
@@ -170,8 +174,23 @@ AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = sm
 # hitting things — the client-side one only catches it a decision earlier.
 AI_MIN_OBSTACLE_CM      = 10
 
+# Sensor sanity (missions/AI_controlled.py) — pre-flight check before motors/
+# threads arm, and a continuous check once running. AI_PREFLIGHT_READS is a
+# handful of back-to-back reads (fast when the sensor is healthy; each read
+# can itself take up to ~1s on the ultrasonic's own echo timeout, so a
+# genuinely dead sensor takes a few seconds to fail out — that's the
+# exception path, not the common case). AI_SENSOR_FAULT_TIMEOUT_S is how
+# long a sensor can keep erroring once already running before it's treated
+# as dead rather than momentarily noisy.
+AI_PREFLIGHT_READS         = 3
+AI_SENSOR_FAULT_TIMEOUT_S  = 5.0
+# How long the LLM can keep re-issuing a forward/curve move that the onboard
+# interlock keeps blocking before the mission gives up and reports STUCK
+# instead of idling in front of the obstacle forever.
+AI_STUCK_TIMEOUT_S         = 15.0
+
 AI_OLLAMA_HOST          = "http://localhost:11434"
-AI_DEFAULT_MODEL        = "llava"       # Any Ollama model; vision models receive images
+AI_DEFAULT_MODEL        = "moondream"   # Any Ollama model; vision models receive images
 AI_LOOP_RATE            = 1.0           # Seconds between LLM calls (1 Hz default)
 AI_COMMAND_HISTORY      = 5             # How many past actions to include in LLM context
 AI_OLLAMA_TIMEOUT       = 60.0          # HTTP timeout for /api/generate — local model cold-starts
@@ -183,4 +202,16 @@ AI_HEARTBEAT_INTERVAL   = 5.0           # Seconds between keepalive bytes on the
 # Robot-side status LED (missions/AI_controlled.py)
 AI_LED_SPIN_INTERVAL    = 0.15          # Seconds between spin steps on the 4-LED "waiting on LLM" chase
 AI_UNRESPONSIVE_WINDOW  = 5.0           # Seconds a tick error keeps the status LED solid red
+
+# Goal system (dev PC sends AI_CMD:GOAL:<dist_cm>:<ir>:<tolerance_cm>:<max_duration_s>
+# once, right after selecting AI_CONTROLLED; robot evaluates it every tick and
+# reports a terminal status — GOAL_REACHED / STUCK / TIMEOUT / SENSOR_FAULT —
+# back over telemetry). These are CLI defaults for AI_controller_client.py /
+# ./start_ai, not robot-side config — None means "no goal on that axis" and
+# is sent to the robot as -1.
+AI_DEFAULT_TASK      = "navigate forward, if obsticles are detected, avoid them and continue."
+AI_GOAL_DISTANCE_CM  = None    # Default --goal-distance-cm
+AI_GOAL_IR           = None    # Default --goal-ir (0-7 bitmask: left<<2 | center<<1 | right)
+AI_GOAL_TOLERANCE_CM = 5.0     # Default --goal-tolerance-cm
+AI_MAX_DURATION_S    = 20.0     # Default --max-duration-s (0 = disabled)
 

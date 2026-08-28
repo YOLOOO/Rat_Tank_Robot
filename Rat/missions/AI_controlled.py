@@ -23,13 +23,27 @@ with other missions' command handlers:
     AI_CMD:ARM_UP / AI_CMD:ARM_DOWN
     AI_CMD:GRIP_OPEN / AI_CMD:GRIP_CLOSE
     AI_CMD:SNAPSHOT        — force an out-of-cycle camera capture
+    AI_CMD:GOAL:dist_cm:ir:tolerance_cm:max_duration_s
+                           — set/replace the mission's goal (see below).
+                             Sent once by the client right after mission
+                             select; -1 on dist_cm/ir means "no goal on
+                             that axis", <=0 on max_duration_s means "no
+                             timeout".
 
 HALT is handled entirely by the brain before this mission ever sees it
-(same model as remote_control), so run() always returns True. Because this
-mission holds resources beyond a single tick (telemetry, snapshot,
-ultrasonic, and LED threads, open sensor handles), on_stop() is what the
-brain calls on HALT to tear them down — run() alone would never get the
-chance.
+(same model as remote_control), so run() always returns True on HALT.
+Because this mission holds resources beyond a single tick (telemetry,
+snapshot, ultrasonic, and LED threads, open sensor handles), on_stop() is
+what the brain calls on HALT to tear them down — run() alone would never
+get the chance.
+
+Terminal statuses: besides running until HALT, this mission can end itself
+via _complete(brain, status, reason) — sending one final telemetry payload
+with a non-"RUNNING" status (GOAL_REACHED, STUCK, TIMEOUT, SENSOR_FAULT)
+and returning False so the brain returns to IDLE cleanly. A pre-flight
+sensor failure (before any of this is armed) is different: it raises
+instead, so the brain drops into ERROR rather than quietly going back to
+IDLE — see run()'s _initialized block.
 
 Ultrasonic reads run on their own thread (get_distance() can bit-bang for
 up to ~1s on a timeout — doing that synchronously on the main tick would
@@ -79,6 +93,8 @@ _generation       = 0
 _initialized      = False
 _telemetry_thread = None
 _telemetry_sock   = None
+_telemetry_send_lock = threading.Lock()  # shared between _telemetry_loop and
+                                          # _complete()'s synchronous final send
 _snapshot_thread  = None
 _led_thread       = None
 _ultrasonic_thread = None
@@ -99,11 +115,58 @@ _last_frame_b64   = None
 _last_camera_time = 0.0
 _force_snapshot   = False
 
+# --- Sensor-fault / stuck tracking ---
+_dist_fault_since = None  # time.time() the ultrasonic started reading -1 continuously, or None
+_ir_fault_since   = None  # time.time() infrared reads started raising continuously, or None
+_blocked_since    = None  # time.time() the LLM started re-issuing a forward/curve move that
+                           # keeps getting blocked by the onboard obstacle interlock, or None
+
+# --- Goal system — set via AI_CMD:GOAL, evaluated every tick ---
+_goal_dist_cm         = -1.0
+_goal_ir              = -1
+_goal_tolerance_cm    = config.AI_GOAL_TOLERANCE_CM
+_goal_max_duration_s  = 0.0
+
+# --- Terminal status reported over telemetry — see _complete() ---
+_status        = "RUNNING"
+_status_reason = ""
+
+
+class _PreflightFailure(Exception):
+    """Raised only out of the one-time pre-flight sensor check so run()'s
+    general per-tick exception handler (which logs and keeps the mission
+    alive) never swallows it — a dead sensor at startup must abort the
+    mission into ERROR, not be treated like a transient tick hiccup."""
+
+
+def _preflight_check(ultrasonic: Ultrasonic, infrared: Infrared):
+    """A few quick back-to-back reads on both sensors before anything is
+    armed. Only raises on a sensor that looks outright dead — never lets a
+    silently-broken sensor pass as "just far away" or "no line detected".
+
+    Infrared is only checked for read failures, not for a constant value
+    across the burst: a robot sitting still over a non-reflective floor
+    legitimately reads the same (all-zero) value every time, so "constant"
+    isn't a reliable dead-sensor signal here and would just produce false
+    aborts.
+    """
+    dist_readings = []
+    for _ in range(config.AI_PREFLIGHT_READS):
+        dist_readings.append(ultrasonic.get_distance())
+    if all(d == -1 for d in dist_readings):
+        raise _PreflightFailure(f"ultrasonic: all {config.AI_PREFLIGHT_READS} pre-flight reads failed ({dist_readings})")
+
+    for _ in range(config.AI_PREFLIGHT_READS):
+        try:
+            infrared.read_all_infrared()
+        except Exception as e:
+            raise _PreflightFailure(f"infrared: pre-flight read raised {e!r}")
+
 
 def run(brain) -> bool:
     global _initialized, _telemetry_thread, _snapshot_thread, _led_thread, _ultrasonic_thread
     global _ultrasonic, _infrared, _dist_cm, _ir_bits, _last_tick_error_time, _generation
-    global _motor_l, _motor_r
+    global _motor_l, _motor_r, _dist_fault_since, _ir_fault_since, _blocked_since
 
     try:
         if not _initialized:
@@ -112,8 +175,27 @@ def run(brain) -> bool:
             servo.setServoPwm('0', _ARM_DOWN_ANGLE)
             servo.setServoPwm('1', _GRIP_CLOSE_ANGLE)
 
-            _ultrasonic = Ultrasonic()
-            _infrared   = Infrared()
+            ultrasonic = Ultrasonic()
+            infrared   = Infrared()
+            try:
+                _preflight_check(ultrasonic, infrared)
+            except _PreflightFailure as e:
+                logger.error(f"AI_CONTROLLED pre-flight FAILED — aborting without arming motors/threads: {e}")
+                try:
+                    ultrasonic.close()
+                except Exception:
+                    logger.exception("Ultrasonic close error during pre-flight abort")
+                try:
+                    infrared.close()
+                except Exception:
+                    logger.exception("Infrared close error during pre-flight abort")
+                raise
+
+            _ultrasonic = ultrasonic
+            _infrared   = infrared
+            _dist_fault_since = None
+            _ir_fault_since   = None
+            _blocked_since    = None
             _initialized = True
             _generation += 1
             gen = _generation
@@ -148,7 +230,31 @@ def run(brain) -> bool:
 
             logger.info("AI_CONTROLLED armed — arm parked down, grip closed, telemetry starting")
 
-        _ir_bits = _infrared.read_all_infrared()
+        try:
+            _ir_bits = _infrared.read_all_infrared()
+            _ir_fault_since = None
+        except Exception:
+            logger.exception("Infrared read error")
+            if _ir_fault_since is None:
+                _ir_fault_since = time.time()
+            elif time.time() - _ir_fault_since > config.AI_SENSOR_FAULT_TIMEOUT_S:
+                return _complete(brain, "SENSOR_FAULT",
+                                  f"infrared reads failing for >{config.AI_SENSOR_FAULT_TIMEOUT_S}s")
+
+        # Continuous version of the pre-flight check: _dist_cm == -1 already
+        # makes _obstacle_ahead() fail closed (treated as "obstacle") on
+        # every single bad read, which is the right instant reaction — but a
+        # sensor that's actually dead rather than momentarily noisy should
+        # end the mission instead of quietly treating "always -1" as "always
+        # blocked forever".
+        if _dist_cm == -1:
+            if _dist_fault_since is None:
+                _dist_fault_since = time.time()
+            elif time.time() - _dist_fault_since > config.AI_SENSOR_FAULT_TIMEOUT_S:
+                return _complete(brain, "SENSOR_FAULT",
+                                  f"ultrasonic stuck at error/-1 for >{config.AI_SENSOR_FAULT_TIMEOUT_S}s")
+        else:
+            _dist_fault_since = None
 
         # Hard onboard safety interlock — independent of whatever the dev-PC
         # LLM loop decided. AI_CMD commands persist across ticks (the LLM
@@ -171,6 +277,20 @@ def run(brain) -> bool:
             if command.startswith("AI_CMD:"):
                 _dispatch(command)
 
+        if _goal_reached():
+            return _complete(brain, "GOAL_REACHED", f"dist_cm={_dist_cm} ir={_ir_bits}")
+
+        if _blocked_since is not None and (time.time() - _blocked_since) > config.AI_STUCK_TIMEOUT_S:
+            return _complete(brain, "STUCK",
+                              f"forward motion blocked by obstacle for >{config.AI_STUCK_TIMEOUT_S}s")
+
+        if _goal_max_duration_s > 0 and brain.mission_start_time is not None:
+            elapsed = time.time() - brain.mission_start_time
+            if elapsed > _goal_max_duration_s:
+                return _complete(brain, "TIMEOUT", f"exceeded max_duration_s={_goal_max_duration_s}")
+
+    except _PreflightFailure:
+        raise
     except Exception:
         logger.exception("AI_controlled tick error")
         _last_tick_error_time = time.time()
@@ -186,9 +306,19 @@ def on_stop(brain):
     global _initialized, _telemetry_sock, _ultrasonic, _infrared
     global _arm_up, _grip_closed, _motor_l, _motor_r
     global _last_frame_b64, _last_camera_time, _force_snapshot, _last_tick_error_time
+    global _dist_fault_since, _ir_fault_since, _blocked_since
+    global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
+    global _status, _status_reason
 
     _initialized = False  # signals telemetry/snapshot/LED/ultrasonic threads to exit
 
+    # _telemetry_sock is closed here (main thread) while _telemetry_loop
+    # (background thread) may be mid-sendall() on the same socket object.
+    # Unlike the ultrasonic GPIO handle below, this is safe: sendall()
+    # already holds its own reference to the socket object, so a close()
+    # here can at worst make that in-flight send raise — which
+    # _telemetry_loop already catches, logs, and treats as "reconnect".
+    # There's no window where it can corrupt another mission run's state.
     if _telemetry_sock is not None:
         try:
             _telemetry_sock.close()
@@ -217,6 +347,15 @@ def on_stop(brain):
     _last_camera_time   = 0.0
     _force_snapshot      = False
     _last_tick_error_time = 0.0
+    _dist_fault_since   = None
+    _ir_fault_since     = None
+    _blocked_since      = None
+    _goal_dist_cm        = -1.0
+    _goal_ir             = -1
+    _goal_tolerance_cm   = config.AI_GOAL_TOLERANCE_CM
+    _goal_max_duration_s = 0.0
+    _status        = "RUNNING"
+    _status_reason = ""
 
     logger.info("AI_CONTROLLED stopped — sensors and telemetry closed")
 
@@ -230,6 +369,55 @@ def _obstacle_ahead() -> bool:
     against the live reading so it isn't at the mercy of the LLM loop's
     slower cadence or a command type the client-side check doesn't cover."""
     return _dist_cm == -1 or (0 <= _dist_cm < config.AI_MIN_OBSTACLE_CM)
+
+
+def _goal_reached() -> bool:
+    """True once the currently-configured goal (set via AI_CMD:GOAL) is
+    satisfied. With no goal configured on either axis this always returns
+    False — the mission then just runs until HALT/STUCK/TIMEOUT/
+    SENSOR_FAULT, same as before the goal system existed. With both axes
+    configured, both must be satisfied simultaneously."""
+    has_dist_goal = _goal_dist_cm >= 0
+    has_ir_goal   = _goal_ir >= 0
+    if not has_dist_goal and not has_ir_goal:
+        return False
+
+    dist_ok = (not has_dist_goal) or (_dist_cm != -1 and abs(_dist_cm - _goal_dist_cm) <= _goal_tolerance_cm)
+    ir_ok   = (not has_ir_goal) or (_ir_bits == _goal_ir)
+    return dist_ok and ir_ok
+
+
+def _send_telemetry_now():
+    """Send one telemetry payload immediately over whatever socket
+    _telemetry_loop currently holds. Used by _complete() so the dev PC is
+    guaranteed to see the terminal status/reason — waiting on the normal
+    AI_TELEMETRY_RATE-paced loop would race on_stop() tearing the thread
+    down right after run() returns False."""
+    if _telemetry_sock is None:
+        return
+    try:
+        with _telemetry_send_lock:
+            payload = _build_telemetry(last_sent_frame_time=float("inf"))  # never attach a frame — keep this send fast
+            _telemetry_sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+    except Exception:
+        logger.warning("Final telemetry send failed")
+
+
+def _complete(brain, status: str, reason: str) -> bool:
+    """End the mission on a terminal condition — GOAL_REACHED, STUCK,
+    TIMEOUT, or SENSOR_FAULT — instead of running until HALT. Stops the
+    motors, reports the status/reason to the dev PC over telemetry (so the
+    client sees why the mission ended instead of just losing the
+    connection), and returns False so the brain returns to IDLE and calls
+    on_stop() to tear everything down. Always call this as `return
+    _complete(...)` from inside run()."""
+    global _status, _status_reason
+    motor.stop()
+    logger.warning(f"AI_CONTROLLED completing: status={status} reason={reason}")
+    _status        = status
+    _status_reason = reason
+    _send_telemetry_now()
+    return False
 
 
 def _nets_forward(left: int, right: int) -> bool:
@@ -251,7 +439,15 @@ def _speed_for_modifier(parts) -> int:
 
 
 def _dispatch(command: str):
-    global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot
+    global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot, _blocked_since
+    global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
+
+    # Set below only by the FORWARD/CURVE branches when this specific
+    # dispatch got blocked by the obstacle interlock. Any other outcome —
+    # including a FORWARD/CURVE that wasn't blocked — clears the "stuck"
+    # clock: it only keeps ticking while the LLM keeps re-trying the same
+    # blocked forward move tick after tick. See _blocked_since's declaration.
+    blocked_this_command = False
 
     try:
         parts  = command.split(":")
@@ -262,6 +458,7 @@ def _dispatch(command: str):
                 logger.warning(f"Onboard safety: dist_cm={_dist_cm} — blocking FORWARD")
                 motor.stop()
                 _motor_l = _motor_r = 0
+                blocked_this_command = True
             else:
                 speed = _speed_for_modifier(parts)
                 motor.forward(speed)
@@ -290,6 +487,7 @@ def _dispatch(command: str):
                 logger.warning(f"Onboard safety: dist_cm={_dist_cm} — blocking forward CURVE:{left}:{right}")
                 motor.stop()
                 _motor_l = _motor_r = 0
+                blocked_this_command = True
             else:
                 motor.curve(left, right)
                 _motor_l, _motor_r = left, right
@@ -317,12 +515,29 @@ def _dispatch(command: str):
         elif action == "SNAPSHOT":
             _force_snapshot = True
 
+        elif action == "GOAL":
+            _goal_dist_cm        = float(parts[2])
+            _goal_ir             = int(parts[3])
+            _goal_tolerance_cm   = float(parts[4])
+            _goal_max_duration_s = float(parts[5])
+            logger.info(
+                f"Goal set: dist_cm={_goal_dist_cm} ir={_goal_ir} "
+                f"tolerance_cm={_goal_tolerance_cm} max_duration_s={_goal_max_duration_s}"
+            )
+
         else:
             logger.warning(f"Unknown AI_CMD action: {command}")
 
     except Exception:
         logger.exception(f"Bad AI_CMD '{command}'")
         motor.stop()
+
+    finally:
+        if blocked_this_command:
+            if _blocked_since is None:
+                _blocked_since = time.time()
+        else:
+            _blocked_since = None
 
 
 # ----------------------------------------------------------------------------
@@ -342,6 +557,11 @@ def _build_telemetry(last_sent_frame_time: float) -> dict:
         "motor_r": _motor_r,
         "arm":     "up" if _arm_up else "down",
         "grip":    "closed" if _grip_closed else "open",
+        # "RUNNING" for every regular tick; one final payload carries the
+        # terminal status/reason set by _complete() right before the mission
+        # stops itself — see module docstring.
+        "status":  _status,
+        "reason":  _status_reason,
     }
     # Only attach the frame once, the tick after it was captured — sending
     # the same JPEG on every 5Hz telemetry tick would multiply bandwidth for
@@ -355,10 +575,27 @@ def _telemetry_loop(brain, gen):
     global _telemetry_sock
 
     last_sent_frame_time = 0.0
+    connected_ip = None  # IP the current _telemetry_sock is actually connected to
 
     while _initialized and _generation == gen:
+        dev_pc_ip = getattr(brain.command_server, "client_address", None)
+
+        # A new controller connecting (reconnect, NAT rebind, client
+        # restart) changes client_address without ever breaking this
+        # thread's existing outbound socket at the TCP layer — sendall() to
+        # the old peer can keep "succeeding" for a while. Reconnect as soon
+        # as the IP diverges instead of waiting for a send to eventually
+        # fail or time out.
+        if _telemetry_sock is not None and dev_pc_ip != connected_ip:
+            logger.info(f"Controller IP changed ({connected_ip} -> {dev_pc_ip}) — reconnecting telemetry")
+            try:
+                _telemetry_sock.close()
+            except Exception:
+                pass
+            _telemetry_sock = None
+            connected_ip = None
+
         if _telemetry_sock is None:
-            dev_pc_ip = getattr(brain.command_server, "client_address", None)
             if not dev_pc_ip:
                 time.sleep(1.0)
                 continue
@@ -367,6 +604,7 @@ def _telemetry_loop(brain, gen):
                 sock.settimeout(3.0)
                 sock.connect((dev_pc_ip, config.AI_TELEMETRY_PORT))
                 _telemetry_sock = sock
+                connected_ip = dev_pc_ip
                 logger.info(f"Telemetry connected to {dev_pc_ip}:{config.AI_TELEMETRY_PORT}")
             except Exception as e:
                 logger.warning(f"Telemetry connect to {dev_pc_ip} failed: {e}")
@@ -374,10 +612,11 @@ def _telemetry_loop(brain, gen):
                 continue
 
         try:
-            payload = _build_telemetry(last_sent_frame_time)
-            if "frame_b64" in payload:
-                last_sent_frame_time = _last_camera_time
-            _telemetry_sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            with _telemetry_send_lock:
+                payload = _build_telemetry(last_sent_frame_time)
+                if "frame_b64" in payload:
+                    last_sent_frame_time = _last_camera_time
+                _telemetry_sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         except Exception:
             logger.warning("Telemetry send failed — reconnecting")
             try:
@@ -385,6 +624,7 @@ def _telemetry_loop(brain, gen):
             except Exception:
                 pass
             _telemetry_sock = None
+            connected_ip = None
 
         time.sleep(config.AI_TELEMETRY_RATE)
 
@@ -448,25 +688,42 @@ def _led_loop(brain, gen):
 def _capture_jpeg():
     width, height = config.AI_CAMERA_SIZE
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [
                 "rpicam-still", "-n", "-t", "300",
                 "--width", str(width), "--height", str(height),
                 "-q", str(config.AI_CAMERA_JPEG_QUALITY),
                 "-o", "-",
             ],
-            capture_output=True,
-            timeout=8,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        if result.returncode != 0 or not result.stdout:
-            logger.warning(f"Snapshot capture failed: {result.stderr.decode(errors='replace')}")
+        try:
+            stdout, stderr = proc.communicate(timeout=8)
+        except subprocess.TimeoutExpired:
+            # SIGTERM first, same escalation as camera_test.py's stream
+            # cleanup and stop_rat.sh — gives rpicam-still's own libcamera
+            # teardown a chance to release the camera device cleanly. A
+            # bare SIGKILL (what subprocess.run's timeout path uses) skips
+            # that teardown entirely and can leave the device claimed,
+            # breaking every capture after this one until something else
+            # frees it.
+            logger.warning("Snapshot capture timed out — terminating")
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                logger.warning("rpicam-still did not terminate — killing")
+                proc.kill()
+                proc.wait()
             return None
-        return result.stdout
+
+        if proc.returncode != 0 or not stdout:
+            logger.warning(f"Snapshot capture failed: {stderr.decode(errors='replace')}")
+            return None
+        return stdout
     except FileNotFoundError:
         logger.error("rpicam-still not found — camera snapshots disabled")
-        return None
-    except subprocess.TimeoutExpired:
-        logger.warning("Snapshot capture timed out")
         return None
     except Exception:
         logger.exception("Snapshot capture error")
