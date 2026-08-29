@@ -41,12 +41,22 @@ logging.basicConfig(
 
 _VISION_NAME_HINTS = ("llava", "moondream", "bakllava")
 
+def _with_servo_speed_modifiers(*actions):
+    """Each bare action plus its :SLOW/:MID/:FAST variants — matches the
+    robot side's _validate_ai_cmd() in control_receiver_server.py."""
+    out = set()
+    for action in actions:
+        out.add(action)
+        out.update(f"{action}:{speed}" for speed in ("SLOW", "MID", "FAST"))
+    return out
+
+
 _VALID_ACTIONS = {
     "FORWARD", "FORWARD:SLOW", "FORWARD:FAST",
     "BACKWARD", "BACKWARD:SLOW", "BACKWARD:FAST",
     "SPIN_LEFT", "SPIN_RIGHT",
-    "STOP", "ARM_UP", "ARM_DOWN", "GRIP_OPEN", "GRIP_CLOSE", "SNAPSHOT",
-}
+    "STOP", "SNAPSHOT",
+} | _with_servo_speed_modifiers("ARM_UP", "ARM_DOWN", "GRIP_OPEN", "GRIP_CLOSE")
 
 SYSTEM_PROMPT_TEMPLATE = """You are the brain of a small tracked robot (tank-style, two independent tracks).
 You receive sensor readings every second and must respond with exactly one action.
@@ -69,10 +79,18 @@ AVAILABLE ACTIONS (respond with exactly one, nothing else):
                   (negative = that track drives forward, positive = backward,
                   same convention as motor_l/motor_r below)
   STOP            stop all motors
-  ARM_UP          raise the arm
-  ARM_DOWN        lower the arm
-  GRIP_OPEN       open the gripper
-  GRIP_CLOSE      close the gripper
+  ARM_UP          raise the arm (normal speed)
+  ARM_UP:SLOW     raise the arm slowly
+  ARM_UP:FAST     raise the arm fast
+  ARM_DOWN        lower the arm (normal speed)
+  ARM_DOWN:SLOW   lower the arm slowly
+  ARM_DOWN:FAST   lower the arm fast
+  GRIP_OPEN       open the gripper (normal speed)
+  GRIP_OPEN:SLOW  open the gripper slowly (use for a delicate/precise grip)
+  GRIP_OPEN:FAST  open the gripper fast
+  GRIP_CLOSE      close the gripper (normal speed)
+  GRIP_CLOSE:SLOW close the gripper slowly (use for a delicate/precise grip)
+  GRIP_CLOSE:FAST close the gripper fast
 
 SAFETY RULES:
 - If dist_cm < 10, do NOT move forward.

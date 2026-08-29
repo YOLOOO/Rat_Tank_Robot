@@ -20,8 +20,14 @@ with other missions' command handlers:
     AI_CMD:SPIN_RIGHT
     AI_CMD:CURVE:left:right
     AI_CMD:STOP
-    AI_CMD:ARM_UP / AI_CMD:ARM_DOWN
-    AI_CMD:GRIP_OPEN / AI_CMD:GRIP_CLOSE
+    AI_CMD:ARM_UP[:SLOW|:MID|:FAST] / AI_CMD:ARM_DOWN[:SLOW|:MID|:FAST]
+    AI_CMD:GRIP_OPEN[:SLOW|:MID|:FAST] / AI_CMD:GRIP_CLOSE[:SLOW|:MID|:FAST]
+                           — arm/grip moves are non-blocking and time-
+                             interpolated (behavior_scripts/servo/ramp.py),
+                             advanced by one tick's worth every run() call
+                             regardless of new commands — see that module
+                             and config.SERVO_MOVE_FULL_SWEEP_*_S. No
+                             modifier defaults to config.SERVO_MOVE_DEFAULT_SPEED.
     AI_CMD:SNAPSHOT        — force an out-of-cycle camera capture
     AI_CMD:GOAL:dist_cm:ir:tolerance_cm:max_duration_s
                            — set/replace the mission's goal (see below).
@@ -67,6 +73,7 @@ from behavior_scripts.motor import spin_left as m_spin_left
 from behavior_scripts.motor import spin_right as m_spin_right
 from behavior_scripts.motor import curve_turn as m_curve
 from behavior_scripts.motor import stop as m_stop
+from behavior_scripts.servo import ramp as servo_ramp
 from common_hardware import get_led_controller, get_servo_controller
 from common_hardware.ultrasonic import Ultrasonic
 from common_hardware.infrared import Infrared
@@ -110,6 +117,25 @@ _arm_up      = False
 _grip_closed = True
 _motor_l     = 0
 _motor_r     = 0
+
+# --- Servo move state (behavior_scripts/servo/ramp.py) — one in-progress
+# (or just-completed) move per channel. _arm_angle/_grip_angle are the
+# current tracked angle, updated every tick from ramp.step()'s return value;
+# the _move_start_* fields are frozen for the duration of whichever move is
+# active and only change when a new ARM_*/GRIP_* command retargets it. Set
+# to the parked position on init — see run()'s _initialized block — and
+# reset there again in on_stop().
+_arm_angle             = 0.0
+_arm_move_start_angle  = 0.0
+_arm_target_angle      = 0.0
+_arm_move_start_time   = 0.0
+_arm_move_duration     = 0.0
+
+_grip_angle            = 0.0
+_grip_move_start_angle = 0.0
+_grip_target_angle     = 0.0
+_grip_move_start_time  = 0.0
+_grip_move_duration    = 0.0
 
 _last_tick_error_time = 0.0  # time.time() of the most recent tick exception
 
@@ -172,6 +198,8 @@ def run(brain) -> bool:
     global _initialized, _telemetry_thread, _snapshot_thread, _led_thread, _ultrasonic_thread
     global _ultrasonic, _infrared, _dist_cm, _ir_bits, _last_tick_error_time, _generation
     global _motor_l, _motor_r, _dist_fault_since, _ir_fault_since, _blocked_since
+    global _arm_angle, _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
+    global _grip_angle, _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
 
     try:
         if not _initialized:
@@ -179,6 +207,16 @@ def run(brain) -> bool:
             servo = get_servo_controller()
             servo.setServoPwm('0', _ARM_DOWN_ANGLE)
             servo.setServoPwm('1', _GRIP_CLOSE_ANGLE)
+            # Instant park, not a ramped move — this is one-time hardware
+            # arming, not a commanded ARM_*/GRIP_* action. Seed the move
+            # state as "already there" so the first real command computes
+            # its ramp distance from the actual parked angle.
+            _arm_angle = _arm_move_start_angle = _arm_target_angle = float(_ARM_DOWN_ANGLE)
+            _arm_move_start_time = 0.0
+            _arm_move_duration   = 0.0
+            _grip_angle = _grip_move_start_angle = _grip_target_angle = float(_GRIP_CLOSE_ANGLE)
+            _grip_move_start_time = 0.0
+            _grip_move_duration   = 0.0
 
             ultrasonic = Ultrasonic()
             infrared   = Infrared()
@@ -274,6 +312,15 @@ def run(brain) -> bool:
             m_stop.run(brain)
             _motor_l = _motor_r = 0
 
+        # Advance any in-progress arm/grip ramp by one tick's worth — runs
+        # every tick regardless of whether a new AI_CMD came in, same as the
+        # obstacle interlock above. A no-op (single comparison, no servo
+        # write) once a move is already complete.
+        _arm_angle, _  = servo_ramp.step('0', _arm_move_start_angle, _arm_target_angle,
+                                          _arm_move_start_time, _arm_move_duration, brain)
+        _grip_angle, _ = servo_ramp.step('1', _grip_move_start_angle, _grip_target_angle,
+                                          _grip_move_start_time, _grip_move_duration, brain)
+
         # Drain all queued commands per tick, same pattern as remote_control.
         while True:
             command = brain.command_server.get_command(timeout=0)
@@ -310,6 +357,8 @@ def on_stop(brain):
     threads and open sensor handles can be released."""
     global _initialized, _telemetry_sock, _ultrasonic, _infrared
     global _arm_up, _grip_closed, _motor_l, _motor_r
+    global _arm_angle, _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
+    global _grip_angle, _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
     global _last_frame_b64, _last_camera_time, _force_snapshot, _last_tick_error_time
     global _dist_fault_since, _ir_fault_since, _blocked_since
     global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
@@ -348,6 +397,16 @@ def on_stop(brain):
     _arm_up            = False
     _grip_closed        = True
     _motor_l = _motor_r = 0
+    # Servo move state resets to the parked position — matches what the
+    # next run()'s _initialized block will physically re-park the hardware
+    # to, so a fresh move's ramp distance is computed correctly from the
+    # start rather than from wherever the last run happened to leave off.
+    _arm_angle = _arm_move_start_angle = _arm_target_angle = float(_ARM_DOWN_ANGLE)
+    _arm_move_start_time = 0.0
+    _arm_move_duration   = 0.0
+    _grip_angle = _grip_move_start_angle = _grip_target_angle = float(_GRIP_CLOSE_ANGLE)
+    _grip_move_start_time = 0.0
+    _grip_move_duration   = 0.0
     _last_frame_b64     = None
     _last_camera_time   = 0.0
     _force_snapshot      = False
@@ -443,9 +502,17 @@ def _speed_for_modifier(parts) -> int:
     return config.MOTOR_SPEED_NORMAL
 
 
+def _servo_speed_for_modifier(parts) -> str:
+    if len(parts) == 3 and parts[2] in ("SLOW", "MID", "FAST"):
+        return parts[2]
+    return config.SERVO_MOVE_DEFAULT_SPEED
+
+
 def _dispatch(command: str, brain):
     global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot, _blocked_since
     global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
+    global _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
+    global _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
 
     # Set below only by the FORWARD/CURVE branches when this specific
     # dispatch got blocked by the obstacle interlock. Any other outcome —
@@ -517,19 +584,40 @@ def _dispatch(command: str, brain):
             _motor_l = _motor_r = 0
 
         elif action == "ARM_UP":
-            get_servo_controller().setServoPwm('0', _ARM_UP_ANGLE)
+            # Retargets the ramp the next tick's servo_ramp.step() advances —
+            # see run(). Starting from _arm_angle (wherever the arm actually
+            # is right now, not the previous move's nominal target) means a
+            # command that arrives mid-move smoothly redirects instead of
+            # jumping back to where the last move started.
+            speed = _servo_speed_for_modifier(parts)
+            _arm_move_start_angle = _arm_angle
+            _arm_target_angle     = _ARM_UP_ANGLE
+            _arm_move_duration    = servo_ramp.duration_for(_arm_move_start_angle, _arm_target_angle, speed)
+            _arm_move_start_time  = time.time()
             _arm_up = True
 
         elif action == "ARM_DOWN":
-            get_servo_controller().setServoPwm('0', _ARM_DOWN_ANGLE)
+            speed = _servo_speed_for_modifier(parts)
+            _arm_move_start_angle = _arm_angle
+            _arm_target_angle     = _ARM_DOWN_ANGLE
+            _arm_move_duration    = servo_ramp.duration_for(_arm_move_start_angle, _arm_target_angle, speed)
+            _arm_move_start_time  = time.time()
             _arm_up = False
 
         elif action == "GRIP_OPEN":
-            get_servo_controller().setServoPwm('1', _GRIP_OPEN_ANGLE)
+            speed = _servo_speed_for_modifier(parts)
+            _grip_move_start_angle = _grip_angle
+            _grip_target_angle     = _GRIP_OPEN_ANGLE
+            _grip_move_duration    = servo_ramp.duration_for(_grip_move_start_angle, _grip_target_angle, speed)
+            _grip_move_start_time  = time.time()
             _grip_closed = False
 
         elif action == "GRIP_CLOSE":
-            get_servo_controller().setServoPwm('1', _GRIP_CLOSE_ANGLE)
+            speed = _servo_speed_for_modifier(parts)
+            _grip_move_start_angle = _grip_angle
+            _grip_target_angle     = _GRIP_CLOSE_ANGLE
+            _grip_move_duration    = servo_ramp.duration_for(_grip_move_start_angle, _grip_target_angle, speed)
+            _grip_move_start_time  = time.time()
             _grip_closed = True
 
         elif action == "SNAPSHOT":

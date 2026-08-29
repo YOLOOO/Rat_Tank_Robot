@@ -203,13 +203,18 @@ class CommandReceiverServer:
             return False
 
     def _validate_ai_cmd(self, command: str) -> bool:
-        """AI_CMD: has several shapes — plain, :SLOW/:FAST modifier,
-        CURVE:left:right with two ints, or GOAL:dist_cm:ir:tolerance_cm:
-        max_duration_s with four numbers. Simple keyword commands are
-        checked against VALID_COMMANDS; the rest are validated here."""
+        """AI_CMD: has several shapes — plain, :SLOW/:FAST (motor) or
+        :SLOW/:MID/:FAST (servo) modifier, CURVE:left:right with two ints,
+        or GOAL:dist_cm:ir:tolerance_cm:max_duration_s with four numbers.
+        Simple keyword commands are checked against VALID_COMMANDS; the
+        rest are validated here."""
         parts = command.split(":")
 
         if len(parts) == 3 and parts[1] in ("FORWARD", "BACKWARD") and parts[2] in ("SLOW", "FAST"):
+            return True
+
+        if len(parts) == 3 and parts[1] in ("ARM_UP", "ARM_DOWN", "GRIP_OPEN", "GRIP_CLOSE") \
+                and parts[2] in ("SLOW", "MID", "FAST"):
             return True
 
         if len(parts) == 4 and parts[1] == "CURVE":

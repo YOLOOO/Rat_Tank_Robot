@@ -111,6 +111,19 @@ SERVO_CH1_MAX = 155
 # PCB version for servo control (same as LED PCB version)
 SERVO_PCB_VERSION = 2
 
+# Servo move speed tiers (behavior_scripts/servo/ramp.py) — seconds for a
+# *full* 0-180 degree sweep at each tier; an actual move's duration scales
+# down proportionally to the angle it's actually travelling (see that
+# module's duration_for()). Time-interpolated per brain tick, not
+# sleep-based, so it's safe to drive from any mission's per-tick run(),
+# AI_controlled.py included, without ever stalling that tick.
+# See MOTOR_SENSORY_REWORK_2026-08-29 in git history for the related
+# motor-side wrapper work this follows the same pattern as.
+SERVO_MOVE_FULL_SWEEP_SLOW_S = 3.0
+SERVO_MOVE_FULL_SWEEP_MID_S  = 1.2
+SERVO_MOVE_FULL_SWEEP_FAST_S = 0.4
+SERVO_MOVE_DEFAULT_SPEED     = "MID"  # tier used when no :SLOW/:MID/:FAST modifier is given
+
 # ============================================================================
 # SENSOR CONFIGURATION
 # ============================================================================
