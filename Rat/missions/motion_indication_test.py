@@ -4,7 +4,7 @@ missions/motion_indication_test.py
 Hardware test mission — cycles through LED, Servo, and Motor checks.
 Called each brain tick via run(brain). Returns False when all phases complete.
 
-Motor API  : import common_hardware.motor as motor  →  motor.set_motors(left, right)
+Motor API  : behavior_scripts.motor.set_motors.run(left, right, brain)
 LED API    : get_led_controller()                   →  led.set_all_led_color(r, g, b)
 Servo API  : get_led_controller()                   →  led.set_all_led_color(r, g, b)
 Servo API  : get_servo_controller()                 →  servo.setServoPwm('0', angle)
@@ -13,7 +13,10 @@ Servo API  : get_servo_controller()                 →  servo.setServoPwm('0', 
 import logging
 import time
 
-import common_hardware.motor as motor
+from behavior_scripts.motor import set_motors as m_set_motors
+from behavior_scripts.motor import spin_left as m_spin_left
+from behavior_scripts.motor import spin_right as m_spin_right
+from behavior_scripts.motor import stop as m_stop
 from common_hardware import get_led_controller, get_servo_controller
 
 import config
@@ -123,21 +126,21 @@ def _run_servo_phase() -> bool:
 # Motor phase — brief movement sequences
 # ---------------------------------------------------------------------------
 _MOTOR_MOVES = [
-    ("Forward",      lambda: motor.set_motors( config.MOTOR_SPEED_NORMAL,  config.MOTOR_SPEED_NORMAL),  2.0),
-    ("Backward",     lambda: motor.set_motors(-config.MOTOR_SPEED_NORMAL, -config.MOTOR_SPEED_NORMAL),  2.0),
-    ("Spin left",    lambda: motor.spin_left(config.MOTOR_SPEED_NORMAL),                                2.0),
-    ("Spin right",   lambda: motor.spin_right(config.MOTOR_SPEED_NORMAL),                               2.0),
-    ("Curve left",   lambda: motor.set_motors( config.MOTOR_SPEED_SLOW,    config.MOTOR_SPEED_NORMAL),  1.5),
-    ("Curve right",  lambda: motor.set_motors( config.MOTOR_SPEED_NORMAL,  config.MOTOR_SPEED_SLOW),    1.5),
-    ("Stop",         lambda: motor.stop(),                                                               0.5),
+    ("Forward",      lambda brain: m_set_motors.run( config.MOTOR_SPEED_NORMAL,  config.MOTOR_SPEED_NORMAL, brain),  2.0),
+    ("Backward",     lambda brain: m_set_motors.run(-config.MOTOR_SPEED_NORMAL, -config.MOTOR_SPEED_NORMAL, brain),  2.0),
+    ("Spin left",    lambda brain: m_spin_left.run(config.MOTOR_SPEED_NORMAL, brain),                                2.0),
+    ("Spin right",   lambda brain: m_spin_right.run(config.MOTOR_SPEED_NORMAL, brain),                               2.0),
+    ("Curve left",   lambda brain: m_set_motors.run( config.MOTOR_SPEED_SLOW,    config.MOTOR_SPEED_NORMAL, brain),  1.5),
+    ("Curve right",  lambda brain: m_set_motors.run( config.MOTOR_SPEED_NORMAL,  config.MOTOR_SPEED_SLOW, brain),    1.5),
+    ("Stop",         lambda brain: m_stop.run(brain),                                                                0.5),
 ]
 
 
-def _run_motor_phase() -> bool:
+def _run_motor_phase(brain) -> bool:
     global _step, _phase_start
 
     if _step >= len(_MOTOR_MOVES):
-        motor.stop()
+        m_stop.run(brain)
         logger.info("Motor phase complete")
         return False
 
@@ -145,7 +148,7 @@ def _run_motor_phase() -> bool:
     elapsed = time.time() - _phase_start
 
     if elapsed < duration:
-        func()
+        func(brain)
         logger.debug(f"Motor: {name}")
     else:
         _step       += 1
@@ -189,7 +192,7 @@ def run(brain) -> bool:
                 _phase_start = time.time()
 
         elif _phase == 2:
-            if not _run_motor_phase():
+            if not _run_motor_phase(brain):
                 logger.info("All hardware tests complete")
                 _initialized = False
                 return False
@@ -198,6 +201,6 @@ def run(brain) -> bool:
 
     except Exception:
         logger.exception("Test mission error")
-        motor.stop()
+        m_stop.run(brain)
         _initialized = False
         return False

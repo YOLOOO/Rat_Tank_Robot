@@ -327,10 +327,11 @@ Also: before either layer runs, the robot pre-flight-checks both sensors (`AI_PR
 
 ## Behavior Scripts
 
-`behavior_scripts/` contains reusable building blocks for missions — not registered items themselves.
+`behavior_scripts/` contains reusable building blocks for missions — not registered items themselves. Every mission that touches motors (`AI_controlled.py`, `remote_control.py`, `motion_indication_test.py`) now goes through these wrappers instead of calling `common_hardware.motor` directly.
 
-- **motor/forward.py**, **backward.py**, **stop.py**, **curve_turn.py**, **turn_degree.py** — convenience wrappers around `common_hardware.motor` that also check halt state
-- **utilities/check_halt.py** — `is_halted(brain)` helper used by all motor behaviors
+- **motor/forward.py**, **backward.py**, **stop.py**, **curve_turn.py**, **spin_left.py**, **spin_right.py**, **set_motors.py** — convenience wrappers around `common_hardware.motor` that also check halt state before issuing a command. Each `run(...)` (`stop.run` included, for API symmetry) returns `True` if the command was actually issued and `False` if it was skipped because a halt was already in flight — callers that track commanded motor state (see `AI_controlled.py`'s `_motor_l`/`_motor_r`) key off that return value rather than assuming the call went through.
+- **motor/turn_degree.py** — spins in place for a calculated duration to approximate a degree turn. Complete as a behavior, but deliberately **not wired into any mission**: it blocks for the full turn (up to a few seconds), which would stall a mission's per-tick loop and its HALT/command responsiveness along with it. Wiring it in needs its own thread or a non-blocking redesign — left as a follow-up.
+- **utilities/check_halt.py** — `is_halted(brain)` helper used by all motor behaviors. Reads `brain.command_server.halt_flag` (set immediately, on the receiver thread, the instant HALT arrives) rather than `brain.halt_flag` (only ever true for a transient instant inside the main loop's own halt handling, never observable from inside a running mission) — see `MOTOR_SENSORY_REWORK_2026-08-29` in git history if a motor or sensor issue turns up near here.
 
 ## Hardware Abstraction
 

@@ -61,7 +61,12 @@ import subprocess
 import threading
 import time
 
-import common_hardware.motor as motor
+from behavior_scripts.motor import forward as m_forward
+from behavior_scripts.motor import backward as m_backward
+from behavior_scripts.motor import spin_left as m_spin_left
+from behavior_scripts.motor import spin_right as m_spin_right
+from behavior_scripts.motor import curve_turn as m_curve
+from behavior_scripts.motor import stop as m_stop
 from common_hardware import get_led_controller, get_servo_controller
 from common_hardware.ultrasonic import Ultrasonic
 from common_hardware.infrared import Infrared
@@ -170,7 +175,7 @@ def run(brain) -> bool:
 
     try:
         if not _initialized:
-            motor.stop()
+            m_stop.run(brain)
             servo = get_servo_controller()
             servo.setServoPwm('0', _ARM_DOWN_ANGLE)
             servo.setServoPwm('1', _GRIP_CLOSE_ANGLE)
@@ -266,7 +271,7 @@ def run(brain) -> bool:
         # in, using the live _dist_cm the ultrasonic thread just updated.
         if _obstacle_ahead() and _nets_forward(_motor_l, _motor_r):
             logger.warning(f"Onboard safety: dist_cm={_dist_cm} — stopping forward motion")
-            motor.stop()
+            m_stop.run(brain)
             _motor_l = _motor_r = 0
 
         # Drain all queued commands per tick, same pattern as remote_control.
@@ -275,7 +280,7 @@ def run(brain) -> bool:
             if command is None:
                 break
             if command.startswith("AI_CMD:"):
-                _dispatch(command)
+                _dispatch(command, brain)
 
         if _goal_reached():
             return _complete(brain, "GOAL_REACHED", f"dist_cm={_dist_cm} ir={_ir_bits}")
@@ -294,7 +299,7 @@ def run(brain) -> bool:
     except Exception:
         logger.exception("AI_controlled tick error")
         _last_tick_error_time = time.time()
-        motor.stop()
+        m_stop.run(brain)
 
     return True
 
@@ -412,7 +417,7 @@ def _complete(brain, status: str, reason: str) -> bool:
     on_stop() to tear everything down. Always call this as `return
     _complete(...)` from inside run()."""
     global _status, _status_reason
-    motor.stop()
+    m_stop.run(brain)
     logger.warning(f"AI_CONTROLLED completing: status={status} reason={reason}")
     _status        = status
     _status_reason = reason
@@ -438,7 +443,7 @@ def _speed_for_modifier(parts) -> int:
     return config.MOTOR_SPEED_NORMAL
 
 
-def _dispatch(command: str):
+def _dispatch(command: str, brain):
     global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot, _blocked_since
     global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
 
@@ -456,44 +461,59 @@ def _dispatch(command: str):
         if action == "FORWARD":
             if _obstacle_ahead():
                 logger.warning(f"Onboard safety: dist_cm={_dist_cm} — blocking FORWARD")
-                motor.stop()
+                m_stop.run(brain)
                 _motor_l = _motor_r = 0
                 blocked_this_command = True
             else:
                 speed = _speed_for_modifier(parts)
-                motor.forward(speed)
                 # _motor_l/_motor_r track actual raw duty sent to set_motors()
                 # (negative = physically forward — see motor.py), not the
                 # command's semantic sign, so telemetry and the obstacle
-                # checks below agree with CURVE's raw values too.
-                _motor_l = _motor_r = -speed
+                # checks below agree with CURVE's raw values too. Only
+                # recorded if the wrapper actually issued the command — a
+                # HALT racing in mid-dispatch (m_forward.run() returns
+                # False) must not leave telemetry claiming motion that was
+                # never sent; the brain stops the motors for real on its
+                # very next tick regardless.
+                if m_forward.run(speed, brain):
+                    _motor_l = _motor_r = -speed
+                else:
+                    _motor_l = _motor_r = 0
 
         elif action == "BACKWARD":
             speed = _speed_for_modifier(parts)
-            motor.backward(speed)
-            _motor_l = _motor_r = speed
+            if m_backward.run(speed, brain):
+                _motor_l = _motor_r = speed
+            else:
+                _motor_l = _motor_r = 0
 
         elif action == "SPIN_LEFT":
-            motor.spin_left(config.MOTOR_SPEED_NORMAL)
-            _motor_l, _motor_r = -config.MOTOR_SPEED_NORMAL, config.MOTOR_SPEED_NORMAL
+            if m_spin_left.run(config.MOTOR_SPEED_NORMAL, brain):
+                _motor_l, _motor_r = -config.MOTOR_SPEED_NORMAL, config.MOTOR_SPEED_NORMAL
+            else:
+                _motor_l = _motor_r = 0
 
         elif action == "SPIN_RIGHT":
-            motor.spin_right(config.MOTOR_SPEED_NORMAL)
-            _motor_l, _motor_r = config.MOTOR_SPEED_NORMAL, -config.MOTOR_SPEED_NORMAL
+            if m_spin_right.run(config.MOTOR_SPEED_NORMAL, brain):
+                _motor_l, _motor_r = config.MOTOR_SPEED_NORMAL, -config.MOTOR_SPEED_NORMAL
+            else:
+                _motor_l = _motor_r = 0
 
         elif action == "CURVE":
             left, right = int(parts[2]), int(parts[3])
             if _obstacle_ahead() and _nets_forward(left, right):
                 logger.warning(f"Onboard safety: dist_cm={_dist_cm} — blocking forward CURVE:{left}:{right}")
-                motor.stop()
+                m_stop.run(brain)
                 _motor_l = _motor_r = 0
                 blocked_this_command = True
             else:
-                motor.curve(left, right)
-                _motor_l, _motor_r = left, right
+                if m_curve.run(left, right, brain):
+                    _motor_l, _motor_r = left, right
+                else:
+                    _motor_l = _motor_r = 0
 
         elif action == "STOP":
-            motor.stop()
+            m_stop.run(brain)
             _motor_l = _motor_r = 0
 
         elif action == "ARM_UP":
@@ -530,7 +550,7 @@ def _dispatch(command: str):
 
     except Exception:
         logger.exception(f"Bad AI_CMD '{command}'")
-        motor.stop()
+        m_stop.run(brain)
 
     finally:
         if blocked_this_command:

@@ -15,7 +15,8 @@ This mission runs indefinitely — the operator ends it by sending HALT.
 
 import logging
 
-import common_hardware.motor as motor
+from behavior_scripts.motor import set_motors as m_set_motors
+from behavior_scripts.motor import stop as m_stop
 from common_hardware import get_servo_controller
 import config
 
@@ -77,7 +78,7 @@ def run(brain) -> bool:
                 break
 
             if command.startswith("MOTOR:"):
-                _handle_motor(command)
+                _handle_motor(command, brain)
 
             elif command == "ARM_TOGGLE":
                 _handle_arm_toggle()
@@ -96,18 +97,18 @@ def run(brain) -> bool:
         # position ("stuck"). Log it, stop the motors for safety, and keep the
         # mission alive so the operator keeps getting responses.
         logger.exception("Remote control tick error")
-        motor.stop()
+        m_stop.run(brain)
 
     return True
 
 
-def _handle_motor(command: str):
+def _handle_motor(command: str, brain):
     try:
         _, left, right = command.split(":")
-        motor.set_motors(int(left), int(right))
+        m_set_motors.run(int(left), int(right), brain)
     except Exception:
         logger.exception(f"Bad MOTOR command '{command}'")
-        motor.stop()
+        m_stop.run(brain)
 
 
 def _handle_arm_toggle():
