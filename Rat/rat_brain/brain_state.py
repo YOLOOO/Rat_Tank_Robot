@@ -165,12 +165,6 @@ class RatBrain:
             motor.stop()
         except Exception:
             logger.exception("Motor stop error during HALT")
-        try:
-            servo = get_servo_controller()
-            servo.setServoStop('0')
-            servo.setServoStop('1')
-        except Exception:
-            logger.exception("Servo stop error")
         logger.warning("HALT — all motion stopped")
         try:
             self._stop_mission()
@@ -250,11 +244,29 @@ class RatBrain:
         self._set_led(mission_data["color"])
         logger.info(f"Started mission: {name}")
 
+    def _park_and_stop_servos(self):
+        """Uniform servo shutdown, called from _stop_mission() so it runs on
+        every mission exit — HALT or a mission ending on its own — not just
+        HALT. Snaps both channels to the same arm-down/grip-closed rest
+        position every servo-using mission already treats as its own arming
+        default, waits for the physical move to actually finish, then cuts
+        PWM. See config.SERVO_PARK_* for why the wait matters."""
+        try:
+            servo = get_servo_controller()
+            servo.setServoPwm('0', config.SERVO_PARK_ARM_ANGLE)
+            servo.setServoPwm('1', config.SERVO_PARK_GRIP_ANGLE)
+            time.sleep(config.SERVO_PARK_SETTLE_S)
+            servo.setServoStop('0')
+            servo.setServoStop('1')
+        except Exception:
+            logger.exception("Servo park/stop error")
+
     def _stop_mission(self):
         try:
             motor.stop()
         except Exception:
             logger.exception("Motor stop error")
+        self._park_and_stop_servos()
         # Missions that hold resources beyond a single run() call (background
         # threads, an open camera) never get another run() after HALT — the
         # brain drops straight to IDLE — so this is their only teardown hook.

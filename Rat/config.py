@@ -146,6 +146,25 @@ SERVO_MOVE_FULL_SWEEP_MID_S  = 1.2
 SERVO_MOVE_FULL_SWEEP_FAST_S = 0.4
 SERVO_MOVE_DEFAULT_SPEED     = "MID"  # tier used when no :SLOW/:MID/:FAST modifier is given
 
+# Uniform servo shutdown (rat_brain/brain_state.py's _park_and_stop_servos(),
+# called from _stop_mission() on every mission exit — HALT or a mission
+# ending on its own, not HALT-only). Snaps both channels to this rest
+# position, waits SERVO_PARK_SETTLE_S for the physical move to actually
+# finish, then cuts PWM entirely. Arm parks UP rather than down — parked
+# down sits right in front of the ultrasonic sensor and would occlude it.
+# Snap-not-ramped matches remote_control.py/AI_controlled.py's own "instant
+# park, not a ramped move — one-time hardware positioning" precedent for
+# their own arming defaults. The wait matters: cutting power mid-swing lets
+# gravity/load take over instead of settling somewhere known, and
+# previously only HALT de-energized the servo at all — a mission ending on
+# its own (GOAL_REACHED, STUCK, TIMEOUT, SENSOR_FAULT, or
+# motion_indication_test finishing its sequence) left it energized and
+# holding position indefinitely, a sustained current draw on the same
+# shared rail MOTOR_KICKSTART_DUTY above already treats as a brownout risk.
+SERVO_PARK_ARM_ANGLE  = SERVO_CH0_MAX   # up — clear of the ultrasonic sensor
+SERVO_PARK_GRIP_ANGLE = SERVO_CH1_MAX   # closed
+SERVO_PARK_SETTLE_S   = 0.8             # bounded wait for the snap-to-park move to physically finish before cutting power
+
 # ============================================================================
 # SENSOR CONFIGURATION
 # ============================================================================
