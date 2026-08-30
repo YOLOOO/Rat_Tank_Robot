@@ -10,7 +10,10 @@ Steps:
     2. Capture a still image, verify file exists.
 
 Led signals:
-    Step pass: steady LED_COLOR_CONNECTED (blue), held until the next signal.
+    Running: LED_COLOR_CAMERA_TEST (magenta, this mission's own identity
+             color) blinks at the LED_ACTIVITY_BLINK_* cadence to indicate
+             the test is actively running — same pattern sensory_test.py
+             and remote_control.py already use.
     Step fail: LED_COLOR_CRITICAL (red) fast-blinks for LED_BLINK_DURATION_S,
                then settles solid so a failed final step stays visible.
 """
@@ -28,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def run(brain) -> bool:
+    blink_start = time.time()
+
     # --- Step 1: Detect camera ---
     logger.info("=== CAMERA TEST: Step 1 - Detect Camera ===")
     if is_halted(brain):
@@ -48,7 +53,6 @@ def run(brain) -> bool:
         else:
             logger.info("Step 1 PASS - Camera Detected")
             logger.info(result.stdout.strip())
-            _led_pass()
     except FileNotFoundError:
         logger.error("Step 1 FAIL - rpicam-hello not found, is libcamera installed?")
         _led_error()
@@ -58,7 +62,7 @@ def run(brain) -> bool:
 
     if is_halted(brain):
         return False
-    time.sleep(1)
+    _blink_running(blink_start, 1.0)
 
     # --- Step 2: Capture still image ---
     logger.info("=== CAMERA TEST: Step 2 - Capture still image ===")
@@ -82,7 +86,6 @@ def run(brain) -> bool:
         else:
             size = os.path.getsize(config.CAMERA_TEST_PHOTO)
             logger.info(f"Step 2 PASS - Image saved to {config.CAMERA_TEST_PHOTO} ({size} bytes)")
-            _led_pass()
     except FileNotFoundError:
         logger.error("Step 2 FAIL - rpicam-still not found")
         _led_error()
@@ -98,8 +101,15 @@ def run(brain) -> bool:
 # Helpers
 # ------------------------------------------------------------------------------
 
-def _led_pass():
-    led_patterns.static(config.LED_COLOR_CONNECTED)
+def _blink_running(blink_start, duration_s):
+    """Blocks for duration_s while blinking LED_COLOR_CAMERA_TEST — replaces
+    a bare time.sleep() between steps so the mission color visibly indicates
+    the test is still running, not just holding a static color."""
+    end = time.time() + duration_s
+    while time.time() < end:
+        led_patterns.step_blink(config.LED_COLOR_CAMERA_TEST, config.LED_ACTIVITY_BLINK_ON_S,
+                                 config.LED_ACTIVITY_BLINK_OFF_S, blink_start)
+        time.sleep(0.05)
 
 
 def _led_error():

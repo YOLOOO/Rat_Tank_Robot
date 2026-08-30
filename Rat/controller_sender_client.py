@@ -70,8 +70,8 @@ MENU_KEY_MAP = {
 DRIVE_KEY_MAP = {
     'w': f"MOTOR:{-_SPEED}:{-_SPEED}",   # forward
     's': f"MOTOR:{_SPEED}:{_SPEED}",     # backward
-    'a': f"MOTOR:{-_SPEED}:{_SPEED}",    # spin left
-    'd': f"MOTOR:{_SPEED}:{-_SPEED}",    # spin right
+    'a': f"MOTOR:{_SPEED}:{-_SPEED}",    # spin left
+    'd': f"MOTOR:{-_SPEED}:{_SPEED}",    # spin right
     ' ': "MOTOR:0:0",                    # stop moving, stay in drive mode
     'r': "ARM_TOGGLE",
     'g': "GRIP_TOGGLE",
