@@ -253,7 +253,7 @@ AI_SENSOR_FAULT_TIMEOUT_S  = 5.0
 AI_STUCK_TIMEOUT_S         = 15.0
 
 AI_OLLAMA_HOST          = "http://localhost:11434"
-AI_DEFAULT_MODEL        = "moondream"   # Any Ollama model; vision models receive images
+AI_DEFAULT_MODEL        = "llava"       # Any Ollama model; vision models receive images
 AI_LOOP_RATE            = 1.0           # Seconds between LLM calls (1 Hz default)
 AI_COMMAND_HISTORY      = 5             # How many past actions to include in LLM context
 AI_OLLAMA_TIMEOUT       = 60.0          # HTTP timeout for /api/generate — local model cold-starts
@@ -272,7 +272,7 @@ AI_UNRESPONSIVE_WINDOW  = 5.0           # Seconds a tick error keeps the status 
 # back over telemetry). These are CLI defaults for AI_controller_client.py /
 # ./start_ai, not robot-side config — None means "no goal on that axis" and
 # is sent to the robot as -1.
-AI_DEFAULT_TASK      = "navigate forward, if obsticles are detected, avoid them and continue."
+AI_DEFAULT_TASK      = "Find a small object, navigate to it, lift it with the robot arm."
 AI_GOAL_DISTANCE_CM  = None    # Default --goal-distance-cm
 AI_GOAL_IR           = None    # Default --goal-ir (0-7 bitmask: left<<2 | center<<1 | right)
 AI_GOAL_TOLERANCE_CM = 5.0     # Default --goal-tolerance-cm

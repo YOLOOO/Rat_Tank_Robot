@@ -57,7 +57,7 @@ Held-key driving isn't possible with plain console input (key presses, not press
 
 ### AI Controller (local-LLM driven, DEV PC)
 
-Requires [Ollama](https://ollama.com) running locally with a model pulled (`ollama pull moondream` for a fast vision model — the default, or `ollama pull llama3.2:3b` for text-only). See [AI Controller Reference](#ai-controller-reference) below for the full flag list, wire format, safety model, and goal system.
+Requires [Ollama](https://ollama.com) running locally with a model pulled (`ollama pull llava` for a vision model — the default, or `ollama pull llama3.2:3b` for text-only). See [AI Controller Reference](#ai-controller-reference) below for the full flag list, wire format, safety model, and goal system.
 
 ```bash
 pip install requests
@@ -273,7 +273,7 @@ python AI_controller_client.py --host <ROBOT_IP> --task "..." [flags]
 |------|------------------------|---------|
 | `--host` | `ROBOT_IP` | Robot IP address |
 | `--task` | `AI_DEFAULT_TASK` | Natural-language task given to the LLM |
-| `--model` | `AI_DEFAULT_MODEL` (`moondream`) | Ollama model name — vision models get the camera frame attached |
+| `--model` | `AI_DEFAULT_MODEL` (`llava`) | Ollama model name — vision models get the camera frame attached |
 | `--loop-rate` | `AI_LOOP_RATE` | Seconds between LLM calls |
 | `--goal-distance-cm` | `AI_GOAL_DISTANCE_CM` (none) | Mission ends `GOAL_REACHED` once `dist_cm` is within `--goal-tolerance-cm` of this |
 | `--goal-ir` | `AI_GOAL_IR` (none) | Mission ends `GOAL_REACHED` once the IR bitmask (`left<<2 \| center<<1 \| right`, 0-7) reads exactly this |

@@ -28,7 +28,7 @@ Goal: never let the AI mission drive on a sensor that's silently broken. Two lay
 
 Goal: move from text-only/occasional-snapshot to a vision model actually influencing driving decisions, not just riding along in telemetry.
 
-- [ ] Pick a first vision model to standardize on for this pass (moondream is already the fast-path recommendation in `config.py`/README — good default to start with).
+- [ ] Pick a first vision model to standardize on for this pass (llava is the current default in `config.py`/README — moondream was tried first but produced no action commands; good default to start with).
 - [ ] Confirm `AI_CAMERA_RATE` vs `AI_LOOP_RATE` — right now snapshots are captured independently of the LLM loop cadence; decide whether the loop should wait for a fresh frame before calling Ollama, or just use whatever's most recent (current behavior).
 - [ ] Prompt tuning: the current `SYSTEM_PROMPT_TEMPLATE` only mentions `[image attached]` as a text placeholder — worth testing whether the model needs more explicit instruction on what to look for (obstacles, the target object, etc.) once it's actually driving off the image instead of just receiving it.
 - [ ] Bandwidth/latency check: measure real round-trip time with an image attached at `AI_CAMERA_SIZE`/`AI_CAMERA_JPEG_QUALITY` against `AI_OLLAMA_TIMEOUT` (60s) and `AI_LOOP_RATE` (1s) — vision calls are the most likely thing to blow past the loop rate.
