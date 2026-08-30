@@ -340,6 +340,15 @@ class RatBrain:
                 logger.exception("Mission on_stop error")
         self.running_mission    = None
         self.mission_start_time = None
+        # Reset to a known menu position on every return to IDLE — HALT or a
+        # mission ending on its own. Without this, selection_index just sits
+        # wherever it was left, and AI_controller_client.py's
+        # _select_ai_mission() (which blindly sends a fixed number of RIGHT
+        # presses computed assuming index 0) silently lands on the wrong
+        # mission if the highlight wasn't actually at 0 — e.g. re-running it
+        # right after AI_CONTROLLED itself wraps past the end of the menu
+        # and lands on whatever's one item after it.
+        self.selection_index = 0
         self._flash_to_menu()
         logger.info("Mission stopped")
 
