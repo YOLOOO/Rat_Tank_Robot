@@ -247,10 +247,12 @@ class RatBrain:
 
     @staticmethod
     def _worst_case_start(target: float, ch_min: float, ch_max: float) -> float:
-        """Whichever channel extreme is farther from target — the
-        pessimistic assumption _park_and_stop_servos() paces its ramp
-        against, since there's no position feedback to know how far a
-        de-energized servo actually drooped."""
+        """Whichever channel extreme is farther from target. Bootstrap
+        fallback ONLY, for the rare case a channel has never been commanded
+        this process lifetime (get_last_angle() returns None) — there is
+        truly no information to go on yet. Once anything has commanded the
+        servo even once, _park_and_stop_servos() ramps from that real
+        tracked value instead, never this guess."""
         return ch_min if abs(target - ch_min) >= abs(target - ch_max) else ch_max
 
     def _park_and_stop_servos(self):
@@ -263,14 +265,27 @@ class RatBrain:
         Deliberately not instant: a servo left de-energized during a
         servo-less mission (camera_test, sensory_test) has zero holding
         torque and can droop under gravity for the mission's whole duration
-        with nothing noticing — this is open-loop, there's no position
-        feedback, only the last angle we commanded. A direct snap-to-target
-        used to close whatever gap that drooping left in a single
-        full-power step — a hard slam, not a correction. Since the real
-        starting angle is unknowable, the ramp always paces against the
-        pessimistic worst case (the channel's opposite extreme); if the
-        actual droop was smaller, the servo just reaches target early and
-        holds for the rest of the ramp — harmless either way.
+        with nothing noticing — this is open-loop, there's no true position
+        feedback anywhere in this system. The fix is NOT "ramp from a
+        guessed worst-case angle" — an earlier version of this method did
+        that, and it just moved the slam: servo_ramp.step()'s very first
+        call commands start_angle immediately, full speed, since the servo
+        has no idea it's "step 1 of a ramp" — it just drives toward
+        whatever PWM target it's given. Seeding that first frame with a
+        guessed extreme instantly snapped the arm toward it exactly like
+        the original bug, just relabeled.
+
+        Instead this ramps from HardwareServo.get_last_angle() — the real
+        last angle *commanded* to each channel, tracked centrally in
+        common_hardware/servo.py since every servo move anywhere in the
+        codebase funnels through its one setServoPwm(). That's not true
+        physical position (a servo can still droop away from its last
+        commanded angle while depowered, open-loop, same limitation as
+        before), but it's always at least as accurate as a blind guess and
+        normally far closer to reality, so the first frame is a small
+        correction instead of an instant jump to an assumed extreme. The
+        worst-case-extreme guess is now only a bootstrap fallback for a
+        channel that has never been commanded at all this process lifetime.
 
         servo_ramp.step() is called without a brain argument (defaults to
         None) deliberately — command_server.halt_flag is still True for the
@@ -280,8 +295,16 @@ class RatBrain:
         this exists to cover.
         """
         try:
-            arm_start  = self._worst_case_start(config.SERVO_PARK_ARM_ANGLE,  config.SERVO_CH0_MIN, config.SERVO_CH0_MAX)
-            grip_start = self._worst_case_start(config.SERVO_PARK_GRIP_ANGLE, config.SERVO_CH1_MIN, config.SERVO_CH1_MAX)
+            servo = get_servo_controller()
+
+            arm_start = servo.get_last_angle('0')
+            if arm_start is None:
+                arm_start = self._worst_case_start(config.SERVO_PARK_ARM_ANGLE, config.SERVO_CH0_MIN, config.SERVO_CH0_MAX)
+
+            grip_start = servo.get_last_angle('1')
+            if grip_start is None:
+                grip_start = self._worst_case_start(config.SERVO_PARK_GRIP_ANGLE, config.SERVO_CH1_MIN, config.SERVO_CH1_MAX)
+
             arm_duration  = servo_ramp.duration_for(arm_start,  config.SERVO_PARK_ARM_ANGLE,  config.SERVO_PARK_SPEED)
             grip_duration = servo_ramp.duration_for(grip_start, config.SERVO_PARK_GRIP_ANGLE, config.SERVO_PARK_SPEED)
 
@@ -296,7 +319,6 @@ class RatBrain:
                                                     start_time, grip_duration)
                 time.sleep(0.02)
 
-            servo = get_servo_controller()
             servo.setServoStop('0')
             servo.setServoStop('1')
         except Exception:

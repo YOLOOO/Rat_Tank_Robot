@@ -102,6 +102,19 @@ class HardwareServo:
         self.pwm_gpio12.start(0)  # Start PWM for GPIO 12 with 0% duty cycle
         self.pwm_gpio13.start(0)  # Start PWM for GPIO 13 with 0% duty cycle
         self._running = {'0': True, '1': True}  # Tracks whether each PWM channel is currently enabled
+        # Last angle actually commanded to each channel — not real position
+        # feedback (there is none, this is open-loop PWM), just the last
+        # value we told it to be. None until the first setServoPwm() call
+        # this process lifetime. Every servo move anywhere in the codebase
+        # funnels through setServoPwm() below, so this stays accurate
+        # regardless of which mission (or brain_state.py's own park move)
+        # issued the command.
+        self._last_angle = {'0': None, '1': None}
+
+    def get_last_angle(self, channel):
+        """Last angle actually commanded to this channel, or None if
+        setServoPwm() has never been called for it this process lifetime."""
+        return self._last_angle.get(channel)
 
     def setServoStop(self, channel):
         # Stop the PWM for the specified channel
@@ -140,6 +153,7 @@ class HardwareServo:
         # after a HALT (or after cleanup() ran) would report success but
         # never actually move the servo again for the life of the process.
         angle = _clamp_angle(channel, angle)
+        self._last_angle[channel] = angle
         if channel == '0':
             duty = self.map(angle, 0, 180, 2.5, 12.5)  # Map angle to duty cycle
             if not self._running.get('0'):
