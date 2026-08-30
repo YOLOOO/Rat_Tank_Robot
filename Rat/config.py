@@ -14,36 +14,58 @@ COMMAND_TIMEOUT = 1.0  # seconds
 MAX_COMMAND_QUEUE_SIZE = 100
 
 # ============================================================================
+# LED CONFIGURATION
+# ============================================================================
+# Freenove FNK0077 Tank: 4 LEDs on Raspberry Pi 5 (SPI, GRB format)
+LED_COUNT = 4  # Number of LEDs (Freenove tank has 4)
+LED_BRIGHTNESS = 255  # Max brightness 0-255
+LED_COLOR_FORMAT = 'GRB'  # SPI color sequence
+
+# LED color palette — every LED color used anywhere in the system is defined
+# once here (see behavior_scripts/led/patterns.py for the behaviors that
+# consume them: static/off/blink/blend/spin). Nothing outside this section
+# should hardcode a color tuple.
+LED_COLOR_IDLE          = (0,   255, 0)    # green  - brain idle / menu default
+LED_COLOR_ERROR         = (255, 0,   0)    # red    - brain ERROR state
+LED_COLOR_CRITICAL      = (255, 0,   0)    # red    - mission-level hard failure (e.g. camera_test step fail)
+LED_COLOR_CONNECTED     = (0,   100, 255)  # blue   - active link / activity (AI spin while dev PC connected)
+LED_COLOR_DISCONNECTED  = (255, 80,  0)    # amber  - TCP link lost (kept distinct from LED_COLOR_ERROR: brain
+                                            #          fault and dev-PC disconnect must be visually distinguishable)
+
+# Mission identity colors — shown on menu highlight and while that mission
+# runs. Red and green are reserved exclusively for error/OK signaling (see
+# LED_COLOR_ERROR/CRITICAL/DISCONNECTED and LED_COLOR_IDLE above) — no
+# mission identity color may be pure red or pure green.
+LED_COLOR_MOTION_TEST    = (255, 165, 0)   # orange
+LED_COLOR_SENSORY_TEST   = (255, 255, 0)   # yellow
+LED_COLOR_CAMERA_TEST    = (255, 0,   255) # magenta
+LED_COLOR_REMOTE_CONTROL = (0,   0,   255) # blue
+LED_COLOR_AI_CONTROLLED  = (0,   100, 255) # blue (distinct shade from REMOTE_CONTROL)
+
+# Blink/blend timing defaults (behavior_scripts/led/patterns.py)
+LED_BLINK_ON_S       = 0.15  # fast blink half-period — one-shot fault alerts (flash_alert)
+LED_BLINK_OFF_S      = 0.15
+LED_BLINK_DURATION_S = 1.5   # how long a one-shot error blink runs before settling
+LED_MENU_FLASH_S     = 0.15  # brief LED_COLOR_IDLE flash brain_state.py shows when returning to mission-select
+
+# Slower blink for continuous "mission actively running" indicators (sensory_test,
+# remote_control while connected) — distinct cadence from the fast fault blink above
+# so a viewer can tell "working normally" apart from "something's wrong" at a glance.
+LED_ACTIVITY_BLINK_ON_S  = 0.4
+LED_ACTIVITY_BLINK_OFF_S = 0.4
+
+# ============================================================================
 # MISSION REGISTRY
 # ============================================================================
 # Selectable missions shown in the IDLE menu.
 # Behaviors (behavior_scripts/) are building blocks used by missions — not registered here.
 # Format: {name: (module_path, color_tuple, display_order)}
 MISSIONS = {
-    "MOTION_TEST":    ("missions.motion_indication_test", (255, 0,   0),   1),  # Red     - LED/servo/motor test
-    "SENSORY_TEST":   ("missions.sensory_test",           (0,   255, 0),   2),  # Green   - sensor readout test
-    "REMOTE_CONTROL": ("missions.remote_control",         (0,   0,   255), 3),  # Blue    - controller control
-    "CAMERA_TEST":    ("missions.camera_test",            (255, 0,   255), 4),  # Magenta - camera test
-    "AI_CONTROLLED":  ("missions.AI_controlled",          (0,   100, 255), 5),  # Cyan-blue - LLM-driven autonomy
-}
-
-# ============================================================================
-# LED CONFIGURATION
-# ============================================================================
-# Freenove FNK0077 Tank: 4 LEDs on Raspberry Pi 5 with PCB v2 (SPI, GRB format)
-LED_PIN = 18  # GPIO pin for LED strip (not used for SPI, kept for reference)
-LED_COUNT = 4  # Number of LEDs (Freenove tank has 4)
-LED_BRIGHTNESS = 255  # Max brightness 0-255
-LED_FLASH_INTERVAL = 0.5  # seconds
-LED_PCB_VERSION = 2  # PCB version (2 for Pi 5 SPI, 1 for older Pi RPI_WS281X)
-LED_COLOR_FORMAT = 'GRB'  # SPI PCB v2 uses GRB, RPI_WS281X uses RGB
-
-# LED Colors (RGB)
-LED_COLORS = {
-    "idle": (0, 255, 0),  # Green
-    "running": (0, 100, 255),  # Blue
-    "error": (255, 0, 0),  # Red
-    "selection": (255, 255, 0),  # Yellow
+    "MOTION_TEST":    ("missions.motion_indication_test", LED_COLOR_MOTION_TEST,    1),  # LED/servo/motor test
+    "SENSORY_TEST":   ("missions.sensory_test",           LED_COLOR_SENSORY_TEST,   2),  # sensor readout test
+    "CAMERA_TEST":    ("missions.camera_test",            LED_COLOR_CAMERA_TEST,    3),  # camera test
+    "REMOTE_CONTROL": ("missions.remote_control",         LED_COLOR_REMOTE_CONTROL, 4),  # controller control
+    "AI_CONTROLLED":  ("missions.AI_controlled",          LED_COLOR_AI_CONTROLLED,  5),  # LLM-driven autonomy
 }
 
 # ============================================================================
@@ -156,8 +178,6 @@ MOTOR_SAFETY_TIMEOUT = 10.0  # seconds - max time a behavior can run
 # CAMERA CONFIGURATION
 #=============================================================================
 CAMERA_TEST_PHOTO  = "/home/rat/test_photo/camera_test.jpg"
-CAMERA_STREAM_PORT = 8888
-CAMERA_STREAM_HOST = "0.0.0.0"
 
 # ============================================================================
 # KEYBOARD REMOTE DRIVE  (dev PC side)

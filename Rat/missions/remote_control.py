@@ -13,6 +13,12 @@ Expects commands from the queue:
 
 HALT is handled by brain before this mission ever sees it.
 This mission runs indefinitely — the operator ends it by sending HALT.
+
+Led signals:
+    Controller connected: LED_COLOR_REMOTE_CONTROL blinks at the
+        LED_ACTIVITY_BLINK_* cadence.
+    Controller not connected: solid LED_COLOR_REMOTE_CONTROL (same as the
+        brain's static mission-select color — no separate "waiting" color).
 """
 
 import logging
@@ -21,6 +27,7 @@ import time
 from behavior_scripts.motor import set_motors as m_set_motors
 from behavior_scripts.motor import stop as m_stop
 from behavior_scripts.servo import ramp as servo_ramp
+from behavior_scripts.led import patterns as led_patterns
 from common_hardware import get_servo_controller
 import config
 
@@ -64,6 +71,7 @@ _grip_move_duration    = 0.0
 
 # Set on first tick of each mission run — see run()
 _initialized = False
+_blink_start = 0.0
 
 
 def _servo_clamp(angle: float, ch_min: int, ch_max: int) -> int:
@@ -78,7 +86,7 @@ def run(brain) -> bool:
     HALT is handled entirely by the brain before this is ever called again,
     so this always returns True — the brain is what ends the mission.
     """
-    global _arm_is_up, _grip_is_open, _arm_angle, _grip_angle, _initialized
+    global _arm_is_up, _grip_is_open, _arm_angle, _grip_angle, _initialized, _blink_start
     global _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
     global _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
 
@@ -102,8 +110,16 @@ def run(brain) -> bool:
             _grip_angle = _grip_move_start_angle = _grip_target_angle = float(_GRIP_CLOSE_ANGLE)
             _grip_move_start_time = 0.0
             _grip_move_duration   = 0.0
+            _blink_start = time.time()
             _initialized = True
             logger.info("Remote control armed — arm parked down, grip closed")
+
+        connected = brain.command_server.client_address is not None
+        if connected:
+            led_patterns.step_blink(config.LED_COLOR_REMOTE_CONTROL, config.LED_ACTIVITY_BLINK_ON_S,
+                                     config.LED_ACTIVITY_BLINK_OFF_S, _blink_start)
+        else:
+            led_patterns.static(config.LED_COLOR_REMOTE_CONTROL)
 
         # Advance any in-progress arm/grip ramp by one tick's worth — runs
         # every tick regardless of whether a new toggle came in, same

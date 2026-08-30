@@ -5,8 +5,7 @@ Hardware test mission — cycles through LED, Servo, and Motor checks.
 Called each brain tick via run(brain). Returns False when all phases complete.
 
 Motor API  : behavior_scripts.motor.set_motors.run(left, right, brain)
-LED API    : get_led_controller()                   →  led.set_all_led_color(r, g, b)
-Servo API  : get_led_controller()                   →  led.set_all_led_color(r, g, b)
+LED API    : behavior_scripts.led.patterns             →  patterns.step_blend(color_a, color_b, ...), patterns.off()
 Servo API  : get_servo_controller()                 →  servo.setServoPwm('0', angle)
 """
 
@@ -17,7 +16,8 @@ from behavior_scripts.motor import set_motors as m_set_motors
 from behavior_scripts.motor import spin_left as m_spin_left
 from behavior_scripts.motor import spin_right as m_spin_right
 from behavior_scripts.motor import stop as m_stop
-from common_hardware import get_led_controller, get_servo_controller
+from behavior_scripts.led import patterns as led_patterns
+from common_hardware import get_servo_controller
 
 import config
 
@@ -41,7 +41,7 @@ def _reset():
 
 
 # ---------------------------------------------------------------------------
-# LED phase — cycle through colours, 1 second each
+# LED phase — fade through colours, _LED_BLEND_S seconds per transition
 # ---------------------------------------------------------------------------
 _LED_COLORS = [
     (255, 0,   0,   "Red"),
@@ -53,22 +53,35 @@ _LED_COLORS = [
     (255, 0,   255, "Magenta"),
 ]
 
+_LED_BLEND_S = 1.0  # seconds to fade from one color to the next
+
 
 def _run_led_phase() -> bool:
-    """Returns True while still running, False when done."""
-    led = get_led_controller()
-    elapsed   = time.time() - _phase_start
-    color_idx = int(elapsed)
+    """Returns True while still running, False when done. Fades from each
+    color to the next via led_patterns.step_blend() — each segment ends
+    exactly at the halfway point of its triangle wave (period = 2x the
+    segment length), so only the color_a -> color_b half is ever reached;
+    the wave never gets a chance to fade back before the segment advances."""
+    global _step, _phase_start
 
-    if color_idx < len(_LED_COLORS):
-        r, g, b, name = _LED_COLORS[color_idx]
-        led.set_all_led_color(r, g, b)
-        logger.debug(f"LED: {name}")
-        return True
+    if _step >= len(_LED_COLORS) - 1:
+        led_patterns.off()
+        logger.info("LED phase complete")
+        return False
 
-    led.set_all_led_color(0, 0, 0)
-    logger.info("LED phase complete")
-    return False
+    color_a = _LED_COLORS[_step][:3]
+    name_b  = _LED_COLORS[_step + 1][3]
+    color_b = _LED_COLORS[_step + 1][:3]
+    elapsed = time.time() - _phase_start
+
+    if elapsed >= _LED_BLEND_S:
+        _step       += 1
+        _phase_start = time.time()
+        logger.debug(f"LED: reached {name_b}")
+    else:
+        led_patterns.step_blend(color_a, color_b, _LED_BLEND_S * 2, _phase_start)
+
+    return True
 
 
 # ---------------------------------------------------------------------------

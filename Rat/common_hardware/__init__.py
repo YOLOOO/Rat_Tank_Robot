@@ -19,8 +19,13 @@ def get_led_controller():
     """Get or create the LED controller singleton."""
     global _led_controller
     if _led_controller is None:
+        import config
         from .spi_ledpixel import Freenove_SPI_LedPixel
-        _led_controller = Freenove_SPI_LedPixel()
+        _led_controller = Freenove_SPI_LedPixel(
+            count=config.LED_COUNT,
+            bright=config.LED_BRIGHTNESS,
+            sequence=config.LED_COLOR_FORMAT,
+        )
     return _led_controller
 
 

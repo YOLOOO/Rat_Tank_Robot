@@ -2,37 +2,32 @@
 missions/camera_test.py
 
 Camera subsystem test mission. Runs inside the brain like any other mission.
-Halting at any point (halt command) shuts down cleanly including any
-running stream process.
+No streaming here - this camera is for AI support only, and rpicam-vid
+--listen was locking up the system with nothing yet consuming the stream.
 
 Steps:
     1. Detect camera via rpicam-hello --list-cameras
     2. Capture a still image, verify file exists.
-    3. Start TCP stream, log address, hold until HALT.
 
 Led signals:
-    Step pass: Led 2 steady blue.
-    Step fail: Led 2 fast red blink.
+    Step pass: steady LED_COLOR_CONNECTED (blue), held until the next signal.
+    Step fail: LED_COLOR_CRITICAL (red) fast-blinks for LED_BLINK_DURATION_S,
+               then settles solid so a failed final step stays visible.
 """
 
 import os
 import time
-import socket
 import logging
 import subprocess
 
 import config
 from behavior_scripts.utilities.check_halt import is_halted
+from behavior_scripts.led import patterns as led_patterns
 
 logger = logging.getLogger(__name__)
 
-#stream process held at module level so cleanup() can always reach it.
-_stream_proc = None
-
 
 def run(brain) -> bool:
-    global _stream_proc
-
     # --- Step 1: Detect camera ---
     logger.info("=== CAMERA TEST: Step 1 - Detect Camera ===")
     if is_halted(brain):
@@ -95,65 +90,6 @@ def run(brain) -> bool:
         logger.error("Step 2 FAIL - rpicam-still timed out")
         _led_error()
 
-    if is_halted(brain):
-        return False
-    time.sleep(1)
-
-    # --- Step 3: Start stream ---
-    logger.info("=== CAMERA TEST: Step 3 - Starting stream ===")
-
-    if is_halted(brain):
-        return False
-
-    stream_url = f"tcp://{config.CAMERA_STREAM_HOST}:{config.CAMERA_STREAM_PORT}"
-
-    try:
-        _stream_proc = subprocess.Popen(
-            [
-                "rpicam-vid",
-                "-t", "0",
-                "--codec", "libav",
-                "--libav-format", "mpegts",
-                "--width", "1280",
-                "--height", "720",
-                "--framerate", "30",
-                "--bitrate", "2000000",
-                "--listen",
-                "-o", stream_url
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-
-        robot_ip   = _get_local_ip()
-        viewer_url = f"tcp://{robot_ip}:{config.CAMERA_STREAM_PORT}"
-        vlc_cmd    = f"vlc --network-caching 300 {viewer_url}"
-
-        logger.info(f"Step 3 - Stream started (PID {_stream_proc.pid})")
-        logger.info("=" * 55)
-        logger.info(" Open in VLC on your dev PC (low-lag command):")
-        logger.info(f"   {vlc_cmd}")
-        logger.info(" Or: Media -> Open Network Stream ->")
-        logger.info(f"   {viewer_url}")
-        logger.info(" (GUI: set Tools->Prefs->Input/Codecs->Network caching to 300ms)")
-        logger.info(" Send HALT to stop the stream and end this mission")
-        logger.info("=" * 55)
-        _led_pass()
-
-    except FileNotFoundError:
-        logger.error("Step 3 FAIL - rpicam-vid not found")
-        _led_error()
-        return False
-
-    # Hold here until HALT — poll slowly to avoid busy loop
-    while not is_halted(brain):
-        if _stream_proc and _stream_proc.poll() is not None:
-            logger.error("Stream process died unexpectedly")
-            _led_error()
-            break
-        time.sleep(0.5)
-
-    _cleanup_stream()
     logger.info("Camera test mission ended")
     return False
 
@@ -162,36 +98,10 @@ def run(brain) -> bool:
 # Helpers
 # ------------------------------------------------------------------------------
 
-def _cleanup_stream():
-    global _stream_proc
-    if _stream_proc and _stream_proc.poll() is None:
-        logger.info("Terminating stream process...")
-        _stream_proc.terminate()
-        try:
-            _stream_proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            logger.warning("Stream process did not terminate, killing")
-            _stream_proc.kill()
-    _stream_proc = None
-
-
-def _get_local_ip() -> str:
-    """Get robot LAN IP."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "robot-ip"
-
-
 def _led_pass():
-    # TODO: Wire leds with led_controller.
-    pass
+    led_patterns.static(config.LED_COLOR_CONNECTED)
 
 
 def _led_error():
-    # TODO: Wire leds with led_controller.
-    pass
+    led_patterns.flash_alert(config.LED_COLOR_CRITICAL, config.LED_BLINK_ON_S,
+                              config.LED_BLINK_OFF_S, config.LED_BLINK_DURATION_S)

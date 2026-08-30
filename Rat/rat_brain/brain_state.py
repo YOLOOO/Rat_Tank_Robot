@@ -20,6 +20,7 @@ import config
 from rat_brain.control_receiver_server import get_command_server
 import common_hardware.motor as motor
 from common_hardware import get_led_controller, get_servo_controller
+from behavior_scripts.led import patterns as led_patterns
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -70,8 +71,7 @@ class RatBrain:
 
     def _set_led(self, color: tuple):
         try:
-            r, g, b = color
-            get_led_controller().set_all_led_rgb([r, g, b])
+            led_patterns.static(color)
         except Exception as e:
             logger.warning(f"LED error: {e}")
 
@@ -118,11 +118,26 @@ class RatBrain:
         lines.append("=" * 50)
         logger.info("\n".join(lines))
 
+        self._set_menu_led()
+
+    def _set_menu_led(self):
+        """There is no persistent 'idle' LED state — at rest, the ring always
+        shows the currently highlighted mission's color (LED_COLOR_IDLE is
+        used only as a brief transition flash, see _flash_to_menu())."""
         selected = self._selected_name()
         if selected and selected in self.missions:
             self._set_led(self.missions[selected]["color"])
         else:
-            self._set_led(config.LED_COLORS["idle"])
+            self._set_led(config.LED_COLOR_IDLE)
+
+    def _flash_to_menu(self):
+        """Marks the transition back to mission-select (mission stopped, HALT,
+        or ERROR recovery) with a brief green flash, then settles on the
+        currently highlighted mission's color. Blocks for LED_MENU_FLASH_S —
+        short and deliberate, not a hang risk."""
+        self._set_led(config.LED_COLOR_IDLE)
+        time.sleep(config.LED_MENU_FLASH_S)
+        self._set_menu_led()
 
     # ------------------------------------------------------------------
     # HALT — checked directly from server flag, never queued
@@ -250,7 +265,7 @@ class RatBrain:
                 logger.exception("Mission on_stop error")
         self.running_mission    = None
         self.mission_start_time = None
-        self._set_led(config.LED_COLORS["idle"])
+        self._flash_to_menu()
         logger.info("Mission stopped")
 
     # ------------------------------------------------------------------
@@ -266,7 +281,7 @@ class RatBrain:
                 self._update_running_mission()
 
             elif self.state == RobotState.ERROR:
-                self._set_led(config.LED_COLORS["error"])
+                self._set_led(config.LED_COLOR_ERROR)
                 if self._error_since is None:
                     self._error_since = time.time()
                     logger.error("Entered ERROR state — auto-recovering in 5s")
@@ -274,6 +289,7 @@ class RatBrain:
                     logger.info("Recovering from ERROR state → IDLE")
                     self._error_since = None
                     self.state = RobotState.IDLE
+                    self._flash_to_menu()
 
         except Exception:
             logger.exception("Brain update error")

@@ -74,7 +74,8 @@ from behavior_scripts.motor import spin_right as m_spin_right
 from behavior_scripts.motor import curve_turn as m_curve
 from behavior_scripts.motor import stop as m_stop
 from behavior_scripts.servo import ramp as servo_ramp
-from common_hardware import get_led_controller, get_servo_controller
+from behavior_scripts.led import patterns as led_patterns
+from common_hardware import get_servo_controller
 from common_hardware.ultrasonic import Ultrasonic
 from common_hardware.infrared import Infrared
 import config
@@ -764,25 +765,25 @@ def _led_loop(brain, gen):
     """Spins one LED at a time around the 4-LED ring to show the robot is
     under active dev-PC/LLM control — which is most of the mission, since
     AI_CMD commands are persistent and the robot is otherwise just waiting
-    on the next one. Switches to solid red whenever that control is gone:
-    either the command connection to the dev PC has dropped (brain.command_
-    server.client_address goes None — the client crashed, was Ctrl-C'd
-    without a clean HALT, or the network dropped) or a tick just raised.
-    Both look identical from the robot's side — "the AI stopped driving
-    me" — and are worth surfacing at a glance instead of only in the log.
+    on the next one. Switches to solid LED_COLOR_DISCONNECTED whenever that
+    control is gone: either the command connection to the dev PC has dropped
+    (brain.command_server.client_address goes None — the client crashed, was
+    Ctrl-C'd without a clean HALT, or the network dropped) or a tick just
+    raised. Both look identical from the robot's side — "the AI stopped
+    driving me" — and are worth surfacing at a glance instead of only in the
+    log. Kept visually distinct from the brain's own LED_COLOR_ERROR so a
+    solid ring doesn't conflate "AI lost its dev-PC link" with "brain itself
+    faulted".
     """
-    led = get_led_controller()
-    idx = 0
+    spin_start = time.time()
     while _initialized and _generation == gen:
         disconnected = brain.command_server.client_address is None
         crashed = (time.time() - _last_tick_error_time) < config.AI_UNRESPONSIVE_WINDOW
 
         if disconnected or crashed:
-            led.set_all_led_rgb([255, 0, 0])
+            led_patterns.static(config.LED_COLOR_DISCONNECTED)
         else:
-            led.set_all_led_rgb_data([0, 0, 0])
-            led.set_led_rgb(idx % config.LED_COUNT, [0, 100, 255])
-            idx += 1
+            led_patterns.step_spin(config.LED_COLOR_CONNECTED, config.AI_LED_SPIN_INTERVAL, spin_start)
 
         time.sleep(config.AI_LED_SPIN_INTERVAL)
 
