@@ -148,22 +148,33 @@ SERVO_MOVE_DEFAULT_SPEED     = "MID"  # tier used when no :SLOW/:MID/:FAST modif
 
 # Uniform servo shutdown (rat_brain/brain_state.py's _park_and_stop_servos(),
 # called from _stop_mission() on every mission exit — HALT or a mission
-# ending on its own, not HALT-only). Snaps both channels to this rest
-# position, waits SERVO_PARK_SETTLE_S for the physical move to actually
-# finish, then cuts PWM entirely. Arm parks UP rather than down — parked
-# down sits right in front of the ultrasonic sensor and would occlude it.
-# Snap-not-ramped matches remote_control.py/AI_controlled.py's own "instant
-# park, not a ramped move — one-time hardware positioning" precedent for
-# their own arming defaults. The wait matters: cutting power mid-swing lets
-# gravity/load take over instead of settling somewhere known, and
-# previously only HALT de-energized the servo at all — a mission ending on
-# its own (GOAL_REACHED, STUCK, TIMEOUT, SENSOR_FAULT, or
-# motion_indication_test finishing its sequence) left it energized and
-# holding position indefinitely, a sustained current draw on the same
-# shared rail MOTOR_KICKSTART_DUTY above already treats as a brownout risk.
+# ending on its own, not HALT-only). Eases both channels to this rest
+# position using the same time-interpolated servo_ramp.step() every other
+# servo move in the codebase already uses, then cuts PWM entirely. Arm
+# parks UP rather than down — parked down sits right in front of the
+# ultrasonic sensor and would occlude it.
+#
+# Paced, not instant: a servo left de-energized during a servo-less mission
+# (camera_test, sensory_test) has zero holding torque and can droop under
+# gravity for the mission's whole duration with no software ever noticing —
+# this is open-loop, there's no position feedback, only the last angle we
+# commanded. An instant setServoPwm() to the park angle used to close
+# whatever gap that drooping left in one full-power step — a hard slam, not
+# a gentle correction. Since we can't know the real starting angle, the ramp
+# always assumes the pessimistic worst case (the channel's opposite
+# extreme) and paces the move over that full-range duration; if the actual
+# droop was smaller, the servo just reaches target early and sits there for
+# the rest of the ramp — harmless either way.
+#
+# Only cutting power *after* it settles still matters: previously only HALT
+# de-energized the servo at all — a mission ending on its own (GOAL_REACHED,
+# STUCK, TIMEOUT, SENSOR_FAULT, or motion_indication_test finishing its
+# sequence) left it energized and holding position indefinitely, a
+# sustained current draw on the same shared rail MOTOR_KICKSTART_DUTY above
+# already treats as a brownout risk.
 SERVO_PARK_ARM_ANGLE  = SERVO_CH0_MAX   # up — clear of the ultrasonic sensor
 SERVO_PARK_GRIP_ANGLE = SERVO_CH1_MAX   # closed
-SERVO_PARK_SETTLE_S   = 0.8             # bounded wait for the snap-to-park move to physically finish before cutting power
+SERVO_PARK_SPEED      = "MID"           # speed tier (see SERVO_MOVE_FULL_SWEEP_*) for the worst-case-bounded park ramp
 
 # ============================================================================
 # SENSOR CONFIGURATION

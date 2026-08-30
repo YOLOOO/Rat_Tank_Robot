@@ -21,6 +21,7 @@ from rat_brain.control_receiver_server import get_command_server
 import common_hardware.motor as motor
 from common_hardware import get_led_controller, get_servo_controller
 from behavior_scripts.led import patterns as led_patterns
+from behavior_scripts.servo import ramp as servo_ramp
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -244,18 +245,58 @@ class RatBrain:
         self._set_led(mission_data["color"])
         logger.info(f"Started mission: {name}")
 
+    @staticmethod
+    def _worst_case_start(target: float, ch_min: float, ch_max: float) -> float:
+        """Whichever channel extreme is farther from target — the
+        pessimistic assumption _park_and_stop_servos() paces its ramp
+        against, since there's no position feedback to know how far a
+        de-energized servo actually drooped."""
+        return ch_min if abs(target - ch_min) >= abs(target - ch_max) else ch_max
+
     def _park_and_stop_servos(self):
         """Uniform servo shutdown, called from _stop_mission() so it runs on
         every mission exit — HALT or a mission ending on its own — not just
-        HALT. Snaps both channels to the same arm-down/grip-closed rest
-        position every servo-using mission already treats as its own arming
-        default, waits for the physical move to actually finish, then cuts
-        PWM. See config.SERVO_PARK_* for why the wait matters."""
+        HALT. Eases both channels to the rest position (config.SERVO_PARK_*)
+        using the same time-interpolated servo_ramp every other servo move
+        in the codebase already uses, then cuts PWM.
+
+        Deliberately not instant: a servo left de-energized during a
+        servo-less mission (camera_test, sensory_test) has zero holding
+        torque and can droop under gravity for the mission's whole duration
+        with nothing noticing — this is open-loop, there's no position
+        feedback, only the last angle we commanded. A direct snap-to-target
+        used to close whatever gap that drooping left in a single
+        full-power step — a hard slam, not a correction. Since the real
+        starting angle is unknowable, the ramp always paces against the
+        pessimistic worst case (the channel's opposite extreme); if the
+        actual droop was smaller, the servo just reaches target early and
+        holds for the rest of the ramp — harmless either way.
+
+        servo_ramp.step() is called without a brain argument (defaults to
+        None) deliberately — command_server.halt_flag is still True for the
+        whole time _process_halt() is inside this call (cleared only after
+        _stop_mission() returns), so passing self would make is_halted()
+        true and silently skip every servo command on exactly the path
+        this exists to cover.
+        """
         try:
+            arm_start  = self._worst_case_start(config.SERVO_PARK_ARM_ANGLE,  config.SERVO_CH0_MIN, config.SERVO_CH0_MAX)
+            grip_start = self._worst_case_start(config.SERVO_PARK_GRIP_ANGLE, config.SERVO_CH1_MIN, config.SERVO_CH1_MAX)
+            arm_duration  = servo_ramp.duration_for(arm_start,  config.SERVO_PARK_ARM_ANGLE,  config.SERVO_PARK_SPEED)
+            grip_duration = servo_ramp.duration_for(grip_start, config.SERVO_PARK_GRIP_ANGLE, config.SERVO_PARK_SPEED)
+
+            start_time = time.time()
+            arm_done = grip_done = False
+            while not (arm_done and grip_done):
+                if not arm_done:
+                    _, arm_done = servo_ramp.step('0', arm_start, config.SERVO_PARK_ARM_ANGLE,
+                                                   start_time, arm_duration)
+                if not grip_done:
+                    _, grip_done = servo_ramp.step('1', grip_start, config.SERVO_PARK_GRIP_ANGLE,
+                                                    start_time, grip_duration)
+                time.sleep(0.02)
+
             servo = get_servo_controller()
-            servo.setServoPwm('0', config.SERVO_PARK_ARM_ANGLE)
-            servo.setServoPwm('1', config.SERVO_PARK_GRIP_ANGLE)
-            time.sleep(config.SERVO_PARK_SETTLE_S)
             servo.setServoStop('0')
             servo.setServoStop('1')
         except Exception:
