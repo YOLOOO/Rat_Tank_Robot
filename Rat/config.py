@@ -229,6 +229,16 @@ AI_CAMERA_RATE          = 1.0           # Seconds between camera snapshots (0 = 
 AI_CAMERA_SIZE          = (320, 240)    # Snapshot resolution for LLM consumption
 AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = smaller payload)
 
+# Hard requirement, not a best-effort target: AI_controller_client.py's
+# control loop must not go longer than this without a decision actually
+# grounded in a fresh camera frame. If a tick would otherwise cross this
+# deadline with no sufficiently-fresh frame in hand, it forces an
+# out-of-cycle capture (AI_CMD:SNAPSHOT) and blocks briefly for it rather
+# than deciding text-only — and refuses to run at all against a model with
+# no vision support in the first place. See _wait_for_fresh_frame() and the
+# vision check in main().
+AI_IMAGE_MAX_INTERVAL_S = 5.0
+
 # Below this, any command that would drive a track forward is blocked.
 # Checked in two places: AI_controlled.py's onboard interlock (every ~50ms
 # tick, using the live sensor reading, regardless of what the dev PC sent)

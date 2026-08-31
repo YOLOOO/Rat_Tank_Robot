@@ -145,6 +145,12 @@ class TelemetryServer:
     def __init__(self, port: int):
         self.port      = port
         self._latest   = None
+        self._last_frame_b64 = None
+        self._last_frame_received_time = None  # time.time() a *new* frame was actually
+                                                # received (not just carried forward) —
+                                                # lets callers tell a genuinely fresh
+                                                # frame apart from an old one still being
+                                                # reused because the camera stalled/died
         self._lock     = threading.Lock()
         self._sock     = None
         self._running  = False
@@ -197,6 +203,20 @@ class TelemetryServer:
                     except json.JSONDecodeError:
                         continue
                     with self._lock:
+                        # The robot only stamps frame_b64 onto one out of
+                        # every ~5 telemetry packets (5Hz telemetry vs. 1Hz
+                        # camera — see missions/AI_controlled.py's
+                        # _build_telemetry). Without carrying the last frame
+                        # forward, whichever packet this control loop
+                        # happens to poll on any given tick is 4-in-5 likely
+                        # to have no image at all, even though a recent one
+                        # exists — not because the camera or connection
+                        # failed.
+                        if "frame_b64" in payload:
+                            self._last_frame_b64 = payload["frame_b64"]
+                            self._last_frame_received_time = time.time()
+                        elif self._last_frame_b64 is not None:
+                            payload["frame_b64"] = self._last_frame_b64
                         self._latest = payload
         except Exception:
             logger.exception("Telemetry read error")
@@ -208,8 +228,19 @@ class TelemetryServer:
             logger.info("Robot telemetry disconnected")
 
     def latest(self) -> dict:
+        """Returns the most recent payload, plus a synthetic "_frame_age_s"
+        field (seconds since a frame was actually captured, not just
+        carried forward) whenever any frame has ever been received — absent
+        entirely if no frame has arrived yet. Callers enforcing
+        config.AI_IMAGE_MAX_INTERVAL_S should check this, not merely
+        whether "frame_b64" is present — that key never disappears once
+        the first frame arrives, even if the camera later dies."""
         with self._lock:
-            return self._latest
+            snap = self._latest
+            if snap is not None and self._last_frame_received_time is not None:
+                snap = dict(snap)
+                snap["_frame_age_s"] = time.time() - self._last_frame_received_time
+            return snap
 
     def stop(self):
         self._running = False
@@ -311,6 +342,28 @@ def _call_ollama(model: str, prompt: str, frame_b64, vision: bool) -> str:
     level = logger.warning if elapsed > config.AI_LOOP_RATE else logger.debug
     level(f"Ollama call took {elapsed:.2f}s (image={has_image})")
     return resp.json().get("response", "").strip()
+
+
+def _wait_for_fresh_frame(telemetry: "TelemetryServer", robot_sock: socket.socket, vision: bool,
+                           timeout: float = 3.0, poll: float = 0.15):
+    """Forces an out-of-cycle camera capture (AI_CMD:SNAPSHOT) and blocks
+    briefly for a frame no older than config.AI_IMAGE_MAX_INTERVAL_S to
+    arrive. Used when the mandatory vision cadence deadline is hit with no
+    sufficiently fresh frame already in hand — see main()'s loop. Returns
+    the refreshed telemetry snapshot on success, None if the timeout
+    elapses without one (camera hardware failure) — callers must not make
+    a driving decision in that case; the vision requirement isn't
+    optional."""
+    _send(robot_sock, "AI_CMD:SNAPSHOT")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        snap = telemetry.latest()
+        if snap and vision:
+            frame_age = snap.get("_frame_age_s")
+            if frame_age is not None and frame_age <= config.AI_IMAGE_MAX_INTERVAL_S:
+                return snap
+        time.sleep(poll)
+    return None
 
 
 def _parse_action(raw: str):
@@ -492,12 +545,21 @@ def main():
     _send_goal(robot_sock, args)
 
     vision = _detect_vision(args.model)
-    logger.info(f"Model '{args.model}' vision={vision}")
+    if not vision:
+        logger.error(
+            f"Model '{args.model}' has no vision support. AI_CONTROLLED requires a "
+            f"vision-capable model — image input is mandatory (see config.AI_IMAGE_MAX_INTERVAL_S), "
+            f"not optional. Pick a vision model (e.g. llava)."
+        )
+        _send(robot_sock, "HALT")
+        sys.exit(1)
+    logger.info(f"Model '{args.model}' vision=True")
 
     history   = deque(maxlen=config.AI_COMMAND_HISTORY)
     stop_event = threading.Event()
     exit_code  = 0
     tick       = 0
+    last_vision_time = time.time()  # see the mandatory-image check in the loop below
     run_dir, log_path = _init_run_log()
 
     def _shutdown(*_):
@@ -526,6 +588,29 @@ def main():
                 exit_code = 0 if status == "GOAL_REACHED" else 1
                 logger.info(f"Mission ended: status={status} reason={reason!r} — exiting {exit_code}")
                 break
+
+            # Mandatory vision cadence: every decision must be grounded in a
+            # frame no older than AI_IMAGE_MAX_INTERVAL_S. "frame_b64 present"
+            # isn't enough to check — TelemetryServer carries the last frame
+            # forward indefinitely, so that key never disappears even if the
+            # camera has since died. _frame_age_s is the real freshness check.
+            frame_age   = snap.get("_frame_age_s")
+            image_fresh = frame_age is not None and frame_age <= config.AI_IMAGE_MAX_INTERVAL_S
+            if image_fresh:
+                last_vision_time = time.time()
+            elif time.time() - last_vision_time >= config.AI_IMAGE_MAX_INTERVAL_S:
+                logger.warning(
+                    f"No image fresher than {config.AI_IMAGE_MAX_INTERVAL_S}s for "
+                    f"{time.time() - last_vision_time:.1f}s — forcing a snapshot and waiting for it"
+                )
+                fresh_snap = _wait_for_fresh_frame(telemetry, robot_sock, vision)
+                if fresh_snap is None:
+                    logger.error("Camera unresponsive — mandatory vision requirement unmet, sending STOP")
+                    _send(robot_sock, "AI_CMD:STOP")
+                    time.sleep(args.loop_rate)
+                    continue
+                snap = fresh_snap
+                last_vision_time = time.time()
 
             tick += 1
             prompt = _build_prompt(args.task, history, snap, vision)
