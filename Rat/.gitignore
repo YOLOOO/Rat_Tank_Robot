@@ -75,3 +75,6 @@ Thumbs.db
 *.tmp
 *.temp
 *.bak
+
+# AI_controller_client.py debug run logs (prompts/responses/frames per tick)
+ai_runs/

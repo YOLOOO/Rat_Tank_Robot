@@ -152,6 +152,9 @@ _dist_fault_since = None  # time.time() the ultrasonic started reading -1 contin
 _ir_fault_since   = None  # time.time() infrared reads started raising continuously, or None
 _blocked_since    = None  # time.time() the LLM started re-issuing a forward/curve move that
                            # keeps getting blocked by the onboard obstacle interlock, or None
+_last_drive_cmd_time = None  # time.time() of the most recent FORWARD/BACKWARD/SPIN/CURVE
+                              # AI_CMD, refreshed on receipt regardless of whether the obstacle
+                              # interlock ends up blocking it — see AI_DRIVE_HOLD_S in config.py
 
 # --- Goal system — set via AI_CMD:GOAL, evaluated every tick ---
 _goal_dist_cm         = -1.0
@@ -198,7 +201,7 @@ def _preflight_check(ultrasonic: Ultrasonic, infrared: Infrared):
 def run(brain) -> bool:
     global _initialized, _telemetry_thread, _snapshot_thread, _led_thread, _ultrasonic_thread
     global _ultrasonic, _infrared, _dist_cm, _ir_bits, _last_tick_error_time, _generation
-    global _motor_l, _motor_r, _dist_fault_since, _ir_fault_since, _blocked_since
+    global _motor_l, _motor_r, _dist_fault_since, _ir_fault_since, _blocked_since, _last_drive_cmd_time
     global _arm_angle, _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
     global _grip_angle, _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
 
@@ -240,6 +243,7 @@ def run(brain) -> bool:
             _dist_fault_since = None
             _ir_fault_since   = None
             _blocked_since    = None
+            _last_drive_cmd_time = None
             _initialized = True
             _generation += 1
             gen = _generation
@@ -313,6 +317,21 @@ def run(brain) -> bool:
             m_stop.run(brain)
             _motor_l = _motor_r = 0
 
+        # Stale-drive-command interlock — a second, independent cap on how
+        # long a FORWARD/BACKWARD/SPIN/CURVE command can keep the tracks
+        # moving without a fresh AI_CMD refreshing it (see AI_DRIVE_HOLD_S).
+        # Distinct from the obstacle interlock above: this fires with a
+        # perfectly clear path too, any time the dev-PC's next decision is
+        # simply slow to arrive (a cold or vision-model Ollama call can take
+        # many seconds — well past AI_LOOP_RATE), turning every drive
+        # command into a short, bounded burst rather than open-loop
+        # dead-reckoning for however long that call happens to take.
+        if (_motor_l != 0 or _motor_r != 0) and _last_drive_cmd_time is not None \
+                and (time.time() - _last_drive_cmd_time) > config.AI_DRIVE_HOLD_S:
+            logger.info(f"Drive command stale (>{config.AI_DRIVE_HOLD_S}s) — holding for next decision")
+            m_stop.run(brain)
+            _motor_l = _motor_r = 0
+
         # Advance any in-progress arm/grip ramp by one tick's worth — runs
         # every tick regardless of whether a new AI_CMD came in, same as the
         # obstacle interlock above. A no-op (single comparison, no servo
@@ -361,7 +380,7 @@ def on_stop(brain):
     global _arm_angle, _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
     global _grip_angle, _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
     global _last_frame_b64, _last_camera_time, _force_snapshot, _last_tick_error_time
-    global _dist_fault_since, _ir_fault_since, _blocked_since
+    global _dist_fault_since, _ir_fault_since, _blocked_since, _last_drive_cmd_time
     global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
     global _status, _status_reason
 
@@ -415,6 +434,7 @@ def on_stop(brain):
     _dist_fault_since   = None
     _ir_fault_since     = None
     _blocked_since      = None
+    _last_drive_cmd_time = None
     _goal_dist_cm        = -1.0
     _goal_ir             = -1
     _goal_tolerance_cm   = config.AI_GOAL_TOLERANCE_CM
@@ -510,7 +530,7 @@ def _servo_speed_for_modifier(parts) -> str:
 
 
 def _dispatch(command: str, brain):
-    global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot, _blocked_since
+    global _motor_l, _motor_r, _arm_up, _grip_closed, _force_snapshot, _blocked_since, _last_drive_cmd_time
     global _goal_dist_cm, _goal_ir, _goal_tolerance_cm, _goal_max_duration_s
     global _arm_move_start_angle, _arm_target_angle, _arm_move_start_time, _arm_move_duration
     global _grip_move_start_angle, _grip_target_angle, _grip_move_start_time, _grip_move_duration
@@ -525,6 +545,14 @@ def _dispatch(command: str, brain):
     try:
         parts  = command.split(":")
         action = parts[1]
+
+        # Refresh the stale-drive-command clock on receipt, regardless of
+        # whether the obstacle interlock below ends up blocking it — a
+        # blocked-but-received command is still a fresh decision from the
+        # LLM, just not one that's allowed to move right now. See
+        # AI_DRIVE_HOLD_S in config.py and run()'s interlock.
+        if action in ("FORWARD", "BACKWARD", "SPIN_LEFT", "SPIN_RIGHT", "CURVE"):
+            _last_drive_cmd_time = time.time()
 
         if action == "FORWARD":
             if _obstacle_ahead():

@@ -237,6 +237,21 @@ AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = sm
 # hitting things — the client-side one only catches it a decision earlier.
 AI_MIN_OBSTACLE_CM      = 10
 
+# A driving command (FORWARD/BACKWARD/SPIN_LEFT/SPIN_RIGHT/CURVE) is only
+# allowed to keep the tracks moving for this long without a fresh AI_CMD
+# refreshing it — checked onboard every ~50ms tick, same as
+# AI_MIN_OBSTACLE_CM above. Motion is otherwise open-loop/indefinite (a
+# command just sets a PWM duty and it holds until something changes it —
+# see missions/AI_controlled.py), so without this cap a single slow LLM
+# tick (a cold or vision model call can legitimately take many seconds,
+# well past AI_LOOP_RATE) turns into that many seconds of uncorrected
+# blind driving, with only the front ultrasonic's narrow cone as a
+# backstop. This turns every drive command into a short burst — the robot
+# holds at zero once a command goes stale, rather than coasting — so the
+# LLM gets a fresh look before committing to more motion than it decided
+# on, without being rushed into deciding faster.
+AI_DRIVE_HOLD_S         = 0.5
+
 # Sensor sanity (missions/AI_controlled.py) — pre-flight check before motors/
 # threads arm, and a continuous check once running. AI_PREFLIGHT_READS is a
 # handful of back-to-back reads (fast when the sensor is healthy; each read

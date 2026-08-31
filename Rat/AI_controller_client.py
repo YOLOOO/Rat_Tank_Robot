@@ -20,14 +20,17 @@ robot-only GPIO libs; do not install it on the dev PC.)
 """
 
 import argparse
+import base64
 import json
 import logging
+import os
 import signal
 import socket
 import sys
 import threading
 import time
 from collections import deque
+from datetime import datetime
 
 import requests
 
@@ -52,11 +55,17 @@ def _with_servo_speed_modifiers(*actions):
 
 
 _VALID_ACTIONS = {
-    "FORWARD", "FORWARD:SLOW", "FORWARD:FAST",
-    "BACKWARD", "BACKWARD:SLOW", "BACKWARD:FAST",
-    "SPIN_LEFT", "SPIN_RIGHT",
     "STOP", "SNAPSHOT",
 } | _with_servo_speed_modifiers("ARM_UP", "ARM_DOWN", "GRIP_OPEN", "GRIP_CLOSE")
+# DRIVE:left:right (each -100..100) is validated separately in _parse_action —
+# same shape as the robot's own AI_CMD:CURVE:left:right, just percent-scaled
+# and sign-flipped (positive=forward here) for the model, then converted to
+# real duty via _drive_to_curve() right before it's sent. DRIVE replaces
+# FORWARD/BACKWARD/SPIN_LEFT/SPIN_RIGHT in the LLM-facing vocabulary only —
+# the robot's own dispatch still understands those, this file just stopped
+# offering them to the model, which previously defaulted to bare FORWARD at
+# full preset speed rather than ever reasoning about how much power a
+# situation called for.
 
 SYSTEM_PROMPT_TEMPLATE = """You are the brain of a small tracked robot (tank-style, two independent tracks).
 You receive sensor readings every second and must respond with exactly one action.
@@ -68,17 +77,19 @@ ROBOT CAPABILITIES
 - One arm (up/down) and one gripper (open/closed)
 
 AVAILABLE ACTIONS (respond with exactly one, nothing else):
-  FORWARD         move forward at normal speed
-  FORWARD:SLOW    move forward slowly
-  FORWARD:FAST    move forward fast
-  BACKWARD        move backward at normal speed
-  BACKWARD:SLOW   move backward slowly
-  SPIN_LEFT       rotate left in place
-  SPIN_RIGHT      rotate right in place
-  CURVE:L:R       fine control — L=left track, R=right track, each -4095 to 4095
-                  (negative = that track drives forward, positive = backward,
-                  same convention as motor_l/motor_r below)
-  STOP            stop all motors
+  DRIVE:L:R       set each track's power directly, -100 to 100
+                  positive = that track drives forward, negative = backward,
+                  magnitude = how much power (100 = full power, small = gentle)
+                  You choose the power — slow down near obstacles or targets,
+                  use full power on a clear open path.
+                  examples:
+                    DRIVE:100:100   full-power straight forward
+                    DRIVE:30:30     gentle straight forward (e.g. approaching a target)
+                    DRIVE:-70:70    spin left in place
+                    DRIVE:70:-70    spin right in place
+                    DRIVE:60:20     curve right while still moving forward
+                    DRIVE:0:0       stop driving
+  STOP            stop all motors immediately
   ARM_UP          raise the arm (normal speed)
   ARM_UP:SLOW     raise the arm slowly
   ARM_UP:FAST     raise the arm fast
@@ -93,7 +104,8 @@ AVAILABLE ACTIONS (respond with exactly one, nothing else):
   GRIP_CLOSE:FAST close the gripper fast
 
 SAFETY RULES:
-- If dist_cm < 10, do NOT move forward.
+- If dist_cm < 10, do NOT send DRIVE with either value positive (forward).
+  Use DRIVE:0:0, a spin (opposite-sign values), or STOP instead.
 - If dist_cm = -1 (sensor error), treat as obstacle at 5cm.
 - Never send anything other than an action keyword. No explanation.
 
@@ -308,7 +320,7 @@ def _parse_action(raw: str):
         candidate = line.strip().strip(".")
         if candidate in _VALID_ACTIONS:
             return candidate
-        if candidate.startswith("CURVE:"):
+        if candidate.startswith("DRIVE:"):
             parts = candidate.split(":")
             if len(parts) == 3:
                 try:
@@ -320,12 +332,25 @@ def _parse_action(raw: str):
     return None
 
 
+def _drive_to_curve(action: str) -> str:
+    """Convert the LLM-facing DRIVE:left_pct:right_pct (-100..100, positive=
+    forward) into the wire-level CURVE:left_duty:right_duty the robot already
+    understands (-4095..4095, negative=forward — see common_hardware/motor.py).
+    Percent is clamped here for clean logs/history; the robot's own _scale()
+    would clamp an out-of-range duty anyway, so this isn't load-bearing for
+    safety, just tidiness."""
+    _, left, right = action.split(":")
+    left  = max(-100, min(100, int(left)))
+    right = max(-100, min(100, int(right)))
+    duty_l = -round(left  / 100 * config.MOTOR_MAX_DUTY)
+    duty_r = -round(right / 100 * config.MOTOR_MAX_DUTY)
+    return f"CURVE:{duty_l}:{duty_r}"
+
+
 def _apply_safety(action: str, snap: dict) -> str:
     """Local models are unreliable about obeying numeric rules in the
     prompt — enforce the no-forward-into-an-obstacle rule client-side too.
-    Covers CURVE as well as FORWARD: a CURVE with either track commanded
-    positive still drives the robot toward whatever is ahead. This is a
-    second line of defense — the robot's own onboard interlock in
+    This is a second line of defense — the robot's own onboard interlock in
     AI_controlled.py is the one that actually matters, since it reacts
     every ~50ms tick on the live sensor reading instead of waiting for the
     next LLM decision."""
@@ -333,16 +358,15 @@ def _apply_safety(action: str, snap: dict) -> str:
     obstacle = dist == -1 or (0 <= dist < config.AI_MIN_OBSTACLE_CM)
     if not obstacle:
         return action
-    if action == "FORWARD" or action.startswith("FORWARD:"):
-        logger.warning(f"Safety override: dist_cm={dist} — blocking FORWARD, sending STOP instead")
-        return "STOP"
-    if action.startswith("CURVE:"):
+    if action.startswith("DRIVE:"):
         _, left, right = action.split(":")
-        # Negative duty is physically forward (see motor.py) — a symmetric
-        # spin (e.g. -x/+x) nets to zero and isn't treated as driving into
-        # whatever's ahead, matching AI_controlled.py's onboard interlock.
-        if int(left) + int(right) < 0:
-            logger.warning(f"Safety override: dist_cm={dist} — blocking forward CURVE:{left}:{right}, sending STOP instead")
+        # Positive is physically forward in DRIVE's convention (see the
+        # prompt) — a symmetric spin (e.g. -x/+x) nets to zero and isn't
+        # treated as driving into whatever's ahead, matching
+        # AI_controlled.py's onboard interlock (which does the same sum
+        # check in duty space, negative=forward there).
+        if int(left) + int(right) > 0:
+            logger.warning(f"Safety override: dist_cm={dist} — blocking forward DRIVE:{left}:{right}, sending STOP instead")
             return "STOP"
     return action
 
@@ -372,6 +396,54 @@ def _build_prompt(task: str, history, snap: dict, vision: bool) -> str:
         motor_r=snap.get("motor_r"),
         image_line=image_line,
     )
+
+
+# ------------------------------------------------------------------
+# Debug run log — full prompt/response/frame per tick, since the normal
+# INFO log only ever showed the final chosen action, not what the model
+# actually saw or said to get there.
+# ------------------------------------------------------------------
+
+def _init_run_log():
+    ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_runs", ts)
+    os.makedirs(os.path.join(run_dir, "frames"), exist_ok=True)
+    log_path = os.path.join(run_dir, "log.jsonl")
+    logger.info(f"Debug run log: {log_path}")
+    return run_dir, log_path
+
+
+def _log_tick(run_dir, log_path, tick, snap, prompt, raw, parsed_action, final_action, wire_action, frame_b64):
+    frame_file = None
+    if frame_b64:
+        frame_file = f"frames/tick_{tick:05d}.jpg"
+        try:
+            with open(os.path.join(run_dir, frame_file), "wb") as f:
+                f.write(base64.b64decode(frame_b64))
+        except Exception:
+            logger.exception("Failed to save debug frame")
+            frame_file = None
+    entry = {
+        "tick": tick,
+        "time": time.time(),
+        "dist_cm": snap.get("dist_cm"),
+        "ir": snap.get("ir"),
+        "arm": snap.get("arm"),
+        "grip": snap.get("grip"),
+        "motor_l": snap.get("motor_l"),
+        "motor_r": snap.get("motor_r"),
+        "prompt": prompt,
+        "raw_response": raw,
+        "parsed_action": parsed_action,
+        "final_action": final_action,
+        "wire_action": wire_action,
+        "frame": frame_file,
+    }
+    try:
+        with open(log_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        logger.exception("Failed to write debug log entry")
 
 
 # ------------------------------------------------------------------
@@ -425,6 +497,8 @@ def main():
     history   = deque(maxlen=config.AI_COMMAND_HISTORY)
     stop_event = threading.Event()
     exit_code  = 0
+    tick       = 0
+    run_dir, log_path = _init_run_log()
 
     def _shutdown(*_):
         if stop_event.is_set():
@@ -453,6 +527,7 @@ def main():
                 logger.info(f"Mission ended: status={status} reason={reason!r} — exiting {exit_code}")
                 break
 
+            tick += 1
             prompt = _build_prompt(args.task, history, snap, vision)
             frame_b64 = snap.get("frame_b64") if vision else None
 
@@ -465,6 +540,7 @@ def main():
                 # driving blind on a stale decision. Explicitly STOP instead
                 # and let the next successful call re-decide from a standstill.
                 logger.exception("Ollama call failed — sending STOP")
+                _log_tick(run_dir, log_path, tick, snap, prompt, None, None, "STOP", "STOP", frame_b64)
                 _send(robot_sock, "AI_CMD:STOP")
                 time.sleep(args.loop_rate)
                 continue
@@ -472,15 +548,18 @@ def main():
             action = _parse_action(raw)
             if action is None:
                 logger.warning(f"Unparseable LLM response — sending STOP, ignoring: {raw!r}")
+                _log_tick(run_dir, log_path, tick, snap, prompt, raw, None, "STOP", "STOP", frame_b64)
                 _send(robot_sock, "AI_CMD:STOP")
                 time.sleep(args.loop_rate)
                 continue
 
-            action = _apply_safety(action, snap)
+            final_action = _apply_safety(action, snap)
+            wire_action  = _drive_to_curve(final_action) if final_action.startswith("DRIVE:") else final_action
+            _log_tick(run_dir, log_path, tick, snap, prompt, raw, action, final_action, wire_action, frame_b64)
 
-            if _send(robot_sock, f"AI_CMD:{action}"):
-                logger.info(f"dist={snap.get('dist_cm')} ir={snap.get('ir')} -> {action}")
-                history.append((snap, action))
+            if _send(robot_sock, f"AI_CMD:{wire_action}"):
+                logger.info(f"dist={snap.get('dist_cm')} ir={snap.get('ir')} -> {final_action} ({wire_action})")
+                history.append((snap, final_action))
             else:
                 logger.warning("Send failed — robot connection lost")
 
