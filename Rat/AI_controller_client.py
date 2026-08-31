@@ -107,7 +107,12 @@ SAFETY RULES:
 - If dist_cm < 10, do NOT send DRIVE with either value positive (forward).
   Use DRIVE:0:0, a spin (opposite-sign values), or STOP instead.
 - If dist_cm = -1 (sensor error), treat as obstacle at 5cm.
-- Never send anything other than an action keyword. No explanation.
+
+OUTPUT FORMAT — this is strict, not a suggestion:
+- Reply with ONLY the action keyword. Nothing before it, nothing after it.
+- No reasoning, no explanation, no punctuation, no restating the state.
+- Correct reply, in full, with nothing else on the line: DRIVE:50:50
+- Wrong: "I will move forward: DRIVE:50:50" — this wastes time and is rejected.
 
 TASK: {task}
 
@@ -122,7 +127,7 @@ CURRENT STATE:
   motors  : L={motor_l}  R={motor_r}
 {image_line}
 
-Respond with one action:"""
+Action (keyword only):"""
 
 # Appended to image_line only when a frame is actually attached — gives the
 # vision model something concrete to look for instead of just receiving a
@@ -327,7 +332,10 @@ def _detect_vision(model: str) -> bool:
 
 
 def _call_ollama(model: str, prompt: str, frame_b64, vision: bool) -> str:
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    payload = {
+        "model": model, "prompt": prompt, "stream": False,
+        "options": {"num_predict": config.AI_RESPONSE_MAX_TOKENS},
+    }
     has_image = bool(frame_b64 and vision)
     if has_image:
         payload["images"] = [frame_b64]

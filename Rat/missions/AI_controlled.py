@@ -827,7 +827,8 @@ def _capture_jpeg():
     try:
         proc = subprocess.Popen(
             [
-                "rpicam-still", "-n", "-t", "300",
+                "rpicam-still", "-n", "-t", str(config.AI_CAMERA_WARMUP_MS),
+                "--rotation", str(config.AI_CAMERA_ROTATION_DEG),
                 "--width", str(width), "--height", str(height),
                 "-q", str(config.AI_CAMERA_JPEG_QUALITY),
                 "-o", "-",

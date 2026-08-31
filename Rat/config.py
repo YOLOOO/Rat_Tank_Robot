@@ -228,6 +228,16 @@ AI_TELEMETRY_RATE       = 0.2           # Seconds between telemetry sends (5 Hz)
 AI_CAMERA_RATE          = 1.0           # Seconds between camera snapshots (0 = disabled)
 AI_CAMERA_SIZE          = (320, 240)    # Snapshot resolution for LLM consumption
 AI_CAMERA_JPEG_QUALITY  = 70            # JPEG quality for snapshots (lower = smaller payload)
+# rpicam-still's -t is warm-up time for AE/AWB to converge before capture,
+# not a shutter speed — too short and the frame comes out dark/blurry.
+# missions/camera_test.py (already proven working on this hardware) uses
+# 2000ms; missions/AI_controlled.py originally used 300ms to keep captures
+# fast, which turned out to be why AI-mission frames came out dark/blurry
+# on hardware test while camera_test.py's own captures were fine.
+AI_CAMERA_WARMUP_MS     = 2000
+# The FNK0077's camera is mounted physically inverted — without this,
+# every AI-mission frame comes out upside down (confirmed on hardware).
+AI_CAMERA_ROTATION_DEG  = 180
 
 # Hard requirement, not a best-effort target: AI_controller_client.py's
 # control loop must not go longer than this without a decision actually
@@ -278,6 +288,13 @@ AI_SENSOR_FAULT_TIMEOUT_S  = 5.0
 AI_STUCK_TIMEOUT_S         = 15.0
 
 AI_OLLAMA_HOST          = "http://localhost:11434"
+# Hard backstop for the "no explanation" instruction in the prompt — a local
+# model that ignores it and writes a full explanatory sentence before the
+# action costs real wall-clock time generating those extra tokens (observed:
+# 30-50s+ calls on hardware). Capped generously above the longest real action
+# string (e.g. "DRIVE:-100:-100"), so a compliant answer is never truncated,
+# but runaway prose gets cut off fast instead of paid for in full.
+AI_RESPONSE_MAX_TOKENS  = 24
 AI_DEFAULT_MODEL        = "llava"       # Any Ollama model; vision models receive images
 AI_LOOP_RATE            = 1.0           # Seconds between LLM calls (1 Hz default)
 AI_COMMAND_HISTORY      = 5             # How many past actions to include in LLM context
